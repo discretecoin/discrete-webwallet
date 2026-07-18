@@ -1,0 +1,584 @@
+/*
+ * Copyright (c) 2018, Gnock
+ * Copyright (c) 2018, The Masari Project
+ *
+ * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+ *
+ * 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+import {RawFullyEncryptedWallet, RawWallet, Wallet} from "./Wallet";
+import {CoinUri} from "./CoinUri";
+import {Storage} from "./Storage";
+
+export type WalletVaultRecord = {
+	id:string,
+	name:string,
+	address:string,
+	encryptedWalletData?:string,
+	createdAt:string,
+	updatedAt:string,
+	lastOpenedAt:string|null,
+	backupConfirmed:boolean
+}
+
+export type WalletVault = {
+	version:number,
+	activeWalletId:string|null,
+	wallets:WalletVaultRecord[]
+}
+
+export class WalletRepository{
+
+	private static readonly VAULT_STORAGE_KEY = 'wallet-vault';
+	private static readonly LEGACY_WALLET_STORAGE_KEY = 'wallet';
+	private static readonly MIGRATION_NOTICE_KEY = 'wallet-vault-migration-notice';
+	private static currentWalletId:string|null = null;
+
+	static hasOneStored() : Promise<boolean>{
+		return WalletRepository.getWallets().then(function (wallets : WalletVaultRecord[]) {
+			return wallets.length > 0;
+		});
+	}
+
+	static createWalletId(): string {
+		let bytes: Uint8Array;
+		if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+			bytes = new Uint8Array(16);
+			crypto.getRandomValues(bytes);
+		} else {
+			bytes = nacl.randomBytes(16);
+		}
+
+		let hex = '';
+		for (let i = 0; i < bytes.length; ++i) {
+			let part = bytes[i].toString(16);
+			if (part.length === 1)
+				part = '0' + part;
+			hex += part;
+		}
+		return 'wallet_' + hex;
+	}
+
+	static getCurrentWalletId(): string|null {
+		return WalletRepository.currentWalletId;
+	}
+
+	static setCurrentWalletId(walletId: string|null) {
+		WalletRepository.currentWalletId = walletId;
+	}
+
+	private static emptyVault(): WalletVault {
+		return {
+			version: 2,
+			activeWalletId: null,
+			wallets: []
+		};
+	}
+
+	private static hasElectronStorage(): boolean {
+		return typeof window !== 'undefined' && typeof window.discreteStorage !== 'undefined';
+	}
+
+	private static normalizeWalletRecord(rawRecord: any): WalletVaultRecord|null {
+		if (rawRecord === null || typeof rawRecord !== 'object' || typeof rawRecord.id !== 'string')
+			return null;
+
+		let now = new Date().toISOString();
+		return {
+			id: rawRecord.id,
+			name: typeof rawRecord.name === 'string' && rawRecord.name.trim() !== '' ? rawRecord.name : 'Wallet',
+			address: typeof rawRecord.address === 'string' ? rawRecord.address : '',
+			encryptedWalletData: typeof rawRecord.encryptedWalletData === 'string' ? rawRecord.encryptedWalletData : undefined,
+			createdAt: typeof rawRecord.createdAt === 'string' ? rawRecord.createdAt : now,
+			updatedAt: typeof rawRecord.updatedAt === 'string' ? rawRecord.updatedAt : now,
+			lastOpenedAt: typeof rawRecord.lastOpenedAt === 'string' ? rawRecord.lastOpenedAt : null,
+			backupConfirmed: rawRecord.backupConfirmed === true
+		};
+	}
+
+	private static normalizeVault(rawVault: any): WalletVault|null {
+		if (rawVault === null || typeof rawVault === 'undefined')
+			return null;
+
+		if (typeof rawVault === 'string') {
+			try {
+				rawVault = JSON.parse(rawVault);
+			} catch (e) {
+				return null;
+			}
+		}
+
+		if (typeof rawVault !== 'object' || !Array.isArray(rawVault.wallets))
+			return null;
+
+		let vault = WalletRepository.emptyVault();
+		vault.activeWalletId = typeof rawVault.activeWalletId === 'string' ? rawVault.activeWalletId : null;
+		for (let rawRecord of rawVault.wallets) {
+			let record = WalletRepository.normalizeWalletRecord(rawRecord);
+			if (record !== null)
+				vault.wallets.push(record);
+		}
+
+		if (vault.activeWalletId !== null && WalletRepository.findRecord(vault, vault.activeWalletId) === null)
+			vault.activeWalletId = vault.wallets.length > 0 ? vault.wallets[0].id : null;
+
+		return vault;
+	}
+
+	private static loadVault(): Promise<WalletVault|null> {
+		if (WalletRepository.hasElectronStorage() && window.discreteStorage) {
+			return window.discreteStorage.listWallets().then(function (rawVault: any) {
+				return WalletRepository.normalizeVault(rawVault);
+			});
+		}
+
+		return Storage.getItem(WalletRepository.VAULT_STORAGE_KEY, null).then(function (rawVault: any) {
+			return WalletRepository.normalizeVault(rawVault);
+		});
+	}
+
+	private static writeVault(vault: WalletVault): Promise<void> {
+		if (WalletRepository.hasElectronStorage() && window.discreteStorage) {
+			return window.discreteStorage.saveVault(vault);
+		}
+
+		return Storage.setItem(WalletRepository.VAULT_STORAGE_KEY, JSON.stringify(vault));
+	}
+
+	static ensureVault(): Promise<WalletVault> {
+		return WalletRepository.loadVault().then(function (existingVault: WalletVault|null) {
+			if (existingVault !== null)
+				return existingVault;
+
+			return Storage.getItem(WalletRepository.LEGACY_WALLET_STORAGE_KEY, null).then(function (legacyWallet: any) {
+				if (legacyWallet !== null) {
+					let now = new Date().toISOString();
+					let walletId = WalletRepository.createWalletId();
+					let migratedVault: WalletVault = {
+						version: 2,
+						activeWalletId: walletId,
+						wallets: [{
+							id: walletId,
+							name: 'Wallet 1',
+							address: '',
+							encryptedWalletData: legacyWallet,
+							createdAt: now,
+							updatedAt: now,
+							lastOpenedAt: null,
+							backupConfirmed: true
+						}]
+					};
+
+					return WalletRepository.writeVault(migratedVault).then(function () {
+						return Storage.setItem(
+							WalletRepository.MIGRATION_NOTICE_KEY,
+							'walletVault.migrationNoticeContent'
+						).then(function () {
+							return migratedVault;
+						});
+					});
+				}
+
+				let emptyVault = WalletRepository.emptyVault();
+				return WalletRepository.writeVault(emptyVault).then(function () {
+					return emptyVault;
+				});
+			});
+		});
+	}
+
+	static consumeMigrationNotice(): Promise<string|null> {
+		return Storage.getItem(WalletRepository.MIGRATION_NOTICE_KEY, null).then(function (message: string|null) {
+			if (message === null)
+				return null;
+			return Storage.remove(WalletRepository.MIGRATION_NOTICE_KEY).then(function () {
+				return message;
+			});
+		});
+	}
+
+	static getWallets(): Promise<WalletVaultRecord[]> {
+		return WalletRepository.ensureVault().then(function (vault: WalletVault) {
+			return vault.wallets.slice();
+		});
+	}
+
+	static getActiveWalletId(): Promise<string|null> {
+		return WalletRepository.ensureVault().then(function (vault: WalletVault) {
+			return vault.activeWalletId;
+		});
+	}
+
+	static setActiveWalletId(walletId: string|null): Promise<void> {
+		return WalletRepository.ensureVault().then(function (vault: WalletVault) {
+			if (walletId !== null && WalletRepository.findRecord(vault, walletId) === null)
+				throw 'missing_wallet';
+			vault.activeWalletId = walletId;
+			WalletRepository.currentWalletId = walletId;
+
+			if (WalletRepository.hasElectronStorage() && window.discreteStorage)
+				return window.discreteStorage.setActiveWalletId(walletId);
+			return WalletRepository.writeVault(vault);
+		});
+	}
+
+	private static findRecord(vault: WalletVault, walletId: string): WalletVaultRecord|null {
+		for (let wallet of vault.wallets) {
+			if (wallet.id === walletId)
+				return wallet;
+		}
+		return null;
+	}
+
+	private static getNextWalletName(vault: WalletVault): string {
+		return 'Wallet ' + (vault.wallets.length + 1);
+	}
+
+	private static resolveWalletId(vault: WalletVault, walletId?: string|null): string|null {
+		if (typeof walletId === 'string' && WalletRepository.findRecord(vault, walletId) !== null)
+			return walletId;
+		if (WalletRepository.currentWalletId !== null && WalletRepository.findRecord(vault, WalletRepository.currentWalletId) !== null)
+			return WalletRepository.currentWalletId;
+		if (vault.activeWalletId !== null && WalletRepository.findRecord(vault, vault.activeWalletId) !== null)
+			return vault.activeWalletId;
+		if (vault.wallets.length > 0)
+			return vault.wallets[0].id;
+		return null;
+	}
+
+	private static getEncryptedWalletData(record: WalletVaultRecord): Promise<string|null> {
+		if (typeof record.encryptedWalletData === 'string')
+			return Promise.resolve(record.encryptedWalletData);
+		if (WalletRepository.hasElectronStorage() && window.discreteStorage)
+			return window.discreteStorage.loadWallet(record.id);
+		return Promise.resolve(null);
+	}
+	
+	static decodeWithPassword(rawWallet : RawWallet|RawFullyEncryptedWallet, password : string) : Wallet|null{
+		if(password.length > 32)
+			password = password.substr(0 , 32);
+		if(password.length < 32){
+			password = ('00000000000000000000000000000000'+password).slice(-32);
+		}
+		let privKey = new (<any>TextEncoder)("utf8").encode(password);
+		// Fix cyrillic (non-latin) passwords
+		if(privKey.length > 32){
+		   privKey = privKey.slice(-32);
+		}
+
+		//console.log('open wallet with nonce', rawWallet.nonce);
+		let nonce = new (<any>TextEncoder)("utf8").encode(rawWallet.nonce);
+
+		let decodedRawWallet = null;
+
+		//detect if old type or new type of wallet
+		if(typeof (<any>rawWallet).data !== 'undefined'){//RawFullyEncryptedWallet
+			//console.log('new wallet format');
+			let rawFullyEncrypted : RawFullyEncryptedWallet = <any>rawWallet;
+			let encrypted = new Uint8Array(<any>rawFullyEncrypted.data);
+			let decrypted = nacl.secretbox.open(encrypted, nonce, privKey);
+			if(decrypted === null)
+				return null;
+
+			try {
+				decodedRawWallet = JSON.parse(new TextDecoder("utf8").decode(decrypted));
+			}catch (e) {
+				decodedRawWallet = null;
+			}
+		}else{//RawWallet
+			//console.log('old wallet format');
+			let oldRawWallet : RawWallet = <any>rawWallet;
+			let encrypted = new Uint8Array(<any>oldRawWallet.encryptedKeys);
+			let decrypted = nacl.secretbox.open(encrypted, nonce, privKey);
+			if(decrypted === null)
+				return null;
+
+			oldRawWallet.encryptedKeys = new TextDecoder("utf8").decode(decrypted);
+			decodedRawWallet = oldRawWallet;
+		}
+
+		if(decodedRawWallet !== null){
+			let wallet = Wallet.loadFromRaw(decodedRawWallet);
+			if(wallet.coinAddressPrefix !== config.addressPrefix)
+				return null;
+			return wallet;
+		}
+		return null;
+	}
+
+	static getLocalWalletWithPassword(password : string, walletId? : string|null, markOpened: boolean = true) : Promise<Wallet|null>{
+		return WalletRepository.ensureVault().then((vault: WalletVault) => {
+			let resolvedWalletId = WalletRepository.resolveWalletId(vault, walletId);
+			if (resolvedWalletId === null)
+				return null;
+
+			let record = WalletRepository.findRecord(vault, resolvedWalletId);
+			if (record === null)
+				return null;
+
+			return WalletRepository.getEncryptedWalletData(record).then((encryptedWalletData: string|null) => {
+				if (encryptedWalletData === null)
+					return null;
+
+				let wallet = this.decodeWithPassword(JSON.parse(encryptedWalletData), password);
+				if (wallet !== null) {
+					if (!markOpened)
+						return wallet;
+					let now = new Date().toISOString();
+					record.address = wallet.getPublicAddress();
+					record.lastOpenedAt = now;
+					record.updatedAt = now;
+					vault.activeWalletId = resolvedWalletId;
+					WalletRepository.currentWalletId = resolvedWalletId;
+					return WalletRepository.writeVault(vault).then(function () {
+						return wallet;
+					});
+				}
+				return null;
+			});
+		});
+	}
+	
+	static save(wallet : Wallet, password : string, walletId? : string|null, walletName? : string|null, backupConfirmed: boolean = true, makeActive: boolean = true) : Promise<void>{
+		return WalletRepository.ensureVault().then((vault: WalletVault) => {
+			let resolvedWalletId = WalletRepository.resolveWalletId(vault, walletId);
+			if (resolvedWalletId === null || (typeof walletId === 'string' && WalletRepository.findRecord(vault, walletId) === null))
+				resolvedWalletId = typeof walletId === 'string' ? walletId : WalletRepository.createWalletId();
+
+			let existingRecord = WalletRepository.findRecord(vault, resolvedWalletId);
+			let now = new Date().toISOString();
+			let encryptedWalletData = JSON.stringify(this.getEncrypted(wallet, password));
+			let address = wallet.getPublicAddress();
+
+			if (existingRecord === null) {
+				existingRecord = {
+					id: resolvedWalletId,
+					name: walletName !== null && typeof walletName === 'string' && walletName.trim() !== '' ? walletName.trim() : WalletRepository.getNextWalletName(vault),
+					address: address,
+					encryptedWalletData: encryptedWalletData,
+					createdAt: now,
+					updatedAt: now,
+					lastOpenedAt: now,
+					backupConfirmed: backupConfirmed
+				};
+				vault.wallets.push(existingRecord);
+			} else {
+				existingRecord.address = address;
+				existingRecord.encryptedWalletData = encryptedWalletData;
+				existingRecord.updatedAt = now;
+				existingRecord.backupConfirmed = existingRecord.backupConfirmed || backupConfirmed;
+				if (typeof walletName === 'string' && walletName.trim() !== '')
+					existingRecord.name = walletName.trim();
+			}
+
+			if (makeActive && (WalletRepository.currentWalletId === null || WalletRepository.currentWalletId === resolvedWalletId)) {
+				vault.activeWalletId = resolvedWalletId;
+				WalletRepository.currentWalletId = resolvedWalletId;
+			}
+			return WalletRepository.writeVault(vault);
+		});
+	}
+
+	static getEncrypted(wallet : Wallet, password : string) : RawFullyEncryptedWallet{
+		if(password.length > 32)
+			password = password.substr(0 , 32);
+		if(password.length < 32){
+			password = ('00000000000000000000000000000000'+password).slice(-32);
+		}
+
+		let privKey = new (<any>TextEncoder)("utf8").encode(password);
+		// Fix cyrillic (non-latin) passwords
+		if(privKey.length > 32){
+		   privKey = privKey.slice(-32);
+		}
+
+		let rawNonce = nacl.util.encodeBase64(nacl.randomBytes(16));
+		let nonce = new (<any>TextEncoder)("utf8").encode(rawNonce);
+
+		let rawWallet = wallet.exportToRaw();
+		let uint8EncryptedContent = new (<any>TextEncoder)("utf8").encode(JSON.stringify(rawWallet));
+
+		let encrypted : Uint8Array = nacl.secretbox(uint8EncryptedContent, nonce, privKey);
+		let tabEncrypted = [];
+		for(let i = 0; i < encrypted.length; ++i){
+			tabEncrypted.push(encrypted[i]);
+		}
+
+		let fullEncryptedWallet : RawFullyEncryptedWallet = {
+			data:tabEncrypted,
+			nonce:rawNonce
+		};
+
+		return fullEncryptedWallet;
+	}
+
+	static renameWallet(walletId: string, name: string): Promise<void> {
+		let cleanName = name.trim();
+		if (cleanName === '')
+			cleanName = 'Wallet';
+
+		return WalletRepository.ensureVault().then(function (vault: WalletVault) {
+			let record = WalletRepository.findRecord(vault, walletId);
+			if (record === null)
+				throw 'missing_wallet';
+			record.name = cleanName;
+			record.updatedAt = new Date().toISOString();
+
+			if (WalletRepository.hasElectronStorage() && window.discreteStorage)
+				return window.discreteStorage.renameWallet(walletId, cleanName);
+			return WalletRepository.writeVault(vault);
+		});
+	}
+
+	static getEncryptedWalletBackup(walletId: string): Promise<string|null> {
+		return WalletRepository.ensureVault().then(function (vault: WalletVault) {
+			let record = WalletRepository.findRecord(vault, walletId);
+			if (record === null)
+				return null;
+			return WalletRepository.getEncryptedWalletData(record);
+		});
+	}
+
+	static deleteLocalCopy(walletId? : string|null) : Promise<void>{
+		return WalletRepository.ensureVault().then(function (vault: WalletVault) {
+			let resolvedWalletId = WalletRepository.resolveWalletId(vault, walletId);
+			if (resolvedWalletId === null)
+				return Promise.resolve();
+
+			let filteredWallets: WalletVaultRecord[] = [];
+			for (let record of vault.wallets) {
+				if (record.id !== resolvedWalletId)
+					filteredWallets.push(record);
+			}
+			vault.wallets = filteredWallets;
+
+			if (vault.activeWalletId === resolvedWalletId)
+				vault.activeWalletId = vault.wallets.length > 0 ? vault.wallets[0].id : null;
+			if (WalletRepository.currentWalletId === resolvedWalletId)
+				WalletRepository.currentWalletId = null;
+
+			if (WalletRepository.hasElectronStorage() && window.discreteStorage)
+				return window.discreteStorage.deleteWallet(resolvedWalletId);
+			return WalletRepository.writeVault(vault);
+		});
+	}
+
+
+	static downloadEncryptedPdf(wallet : Wallet){
+		if(wallet.pqMasterSeed !== null) {
+			let doc = new jsPDF('portrait');
+			doc.setFontSize(22);
+			doc.text(20, 25, 'Discrete wallet recovery');
+			doc.setFontSize(12);
+			doc.text(20, 42, 'Keep this document private. Anyone with this seed can spend your funds.');
+			doc.text(20, 58, '32-byte master recovery seed:');
+			doc.setFont('courier');
+			doc.text(20, 70, wallet.pqMasterSeed.slice(0, 32));
+			doc.text(20, 78, wallet.pqMasterSeed.slice(32));
+			doc.setFont('helvetica');
+			doc.text(20, 94, 'Restore height: ' + wallet.creationHeight);
+			doc.text(20, 110, 'Restore this wallet using Import from keys and the recovery seed above.');
+			doc.save('discrete-wallet-recovery.pdf');
+			return;
+		}
+		if(wallet.keys.priv.spend === '')
+			throw 'missing_spend';
+
+		let coinWalletUri = CoinUri.encodeWalletKeys(
+			wallet.getPublicAddress(),
+			wallet.keys.priv.spend,
+			wallet.keys.priv.view,
+			wallet.creationHeight
+		);
+
+		let publicQrCode = kjua({
+			render: 'canvas',
+			text: wallet.getPublicAddress(),
+			size:300,
+		});
+
+		let privateSpendQrCode = kjua({
+			render: 'canvas',
+			text: coinWalletUri,
+			size:300,
+		});
+
+		let doc = new jsPDF('landscape');
+
+		//creating background
+		doc.setFillColor(48,70,108);
+		doc.rect(0,0,297,210, 'F');
+
+		//white blocks
+		doc.setFillColor(255,255,255);
+		doc.rect(108,10,80,80, 'F');
+		doc.rect(10,115,80,80, 'F');
+
+		//blue blocks
+		doc.setFillColor(0, 160, 227);
+		doc.rect(108,115,80,80, 'F');
+
+		//blue background for texts
+		doc.setFillColor(0, 160, 227);
+
+		doc.rect(108,15,80,20, 'F');
+		doc.rect(10,120,80,20, 'F');
+
+		doc.setTextColor(255, 255, 255);
+		doc.setFontSize(30);
+		doc.text(15, 135, "Public address");
+		doc.text(123,30, "Private key");
+
+		//lines
+		doc.setDrawColor(255,255,255);
+		doc.setLineWidth(1);
+		doc.line(99,0,99,210);
+		doc.line(198,0,198,210);
+		doc.line(0,105,297,105);
+
+		//adding qr codes
+		doc.addImage(publicQrCode.toDataURL(), 'JPEG', 28, 145, 45, 45);
+		doc.addImage(privateSpendQrCode.toDataURL(), 'JPEG', 126, 40, 45, 45);
+
+		//wallet help
+		doc.setTextColor(255, 255, 255);
+		doc.setFontSize(10);
+		doc.text(110, 120, "To deposit funds to this paper wallet, send ");
+		doc.text(110, 125, "Karbo to the public address");
+
+		doc.text(110, 135, "DO NOT REVEAL THE PRIVATE KEY");
+
+		//adding karbo logo
+		let c : HTMLCanvasElement|null = <HTMLCanvasElement>document.getElementById('canvasExport');
+		if(c !== null) {
+			let ctx = c.getContext("2d");
+			let img: ImageBitmap | null = <ImageBitmap | null>document.getElementById("verticalLogo");
+			if (ctx !== null && img !== null) {
+				c.width = img.width;
+				c.height = img.height;
+				ctx.drawImage(img, 0, 0);
+
+				let ratio = img.width/45;
+				let smallHeight = img.height/ratio;
+				doc.addImage(c.toDataURL(), 'JPEG', 224, 106+(100-smallHeight)/2, 45, smallHeight);
+			}
+		}
+
+		try {
+			doc.save('keys.pdf');
+		} catch(e) {
+			alert('Error ' + e);
+		}
+
+	}
+
+
+
+}

@@ -1,0 +1,110 @@
+<div id="app" class="body-root sendTab" v-cloak="">
+	<div class="qrCodeScanningContainer native hidden" id="nativeCameraPreview">
+		<h2 class="text">{{ $t("sendPage.qrCodeScanning.explication") }}</h2>
+		<div class="close" @click="stopScan()">
+			<i class="fa fa-close" aria-hidden="true"></i>
+		</div>
+	</div>
+
+	<div id="appContent">
+		<div class="body-header">
+			<div class="header-title">
+				<i class="fa fa-paper-plane" aria-hidden="true"></i> {{ $t("sendPage.title") }}
+			</div>
+		</div>
+
+		<div class="card">
+			<div class="field">
+				<label>{{ $t("sendPage.sendBlock.address.label") }}</label>
+				<div class="subfield">
+					<input type="text" v-model="destinationAddressUser" v-bind:placeholder="$t('sendPage.sendBlock.address.placeholder')" :readonly="lockedForm" :class="{ twoActions: nfcAvailable}" autocomplete="off"/>
+					<span class="action scanAction" @click="startScan()"><i class="fa fa-camera" aria-hidden="true"></i></span>
+					<span class="action nfcAction" @click="startNfcScan()" v-if="nfcAvailable"><i class="fa fa-rss" aria-hidden="true"></i></span>
+				</div>
+				<div v-if="!destinationAddressValid && !accountNumberValid && destinationAddressUser != ''" class="message error">
+					{{ $t("sendPage.sendBlock.address.accountNumberNotFound") }}
+				</div>
+				<div v-if="!destinationAddressValid && accountNumberValid && destinationAddressUser != ''" class="message error">
+					{{ $t("sendPage.sendBlock.address.invalid") }}
+				</div>
+				<div v-if="accountNumberAddress !== null" class="message">
+					<b>{{ $t("sendPage.sendBlock.address.fundsTo") }}: </b> {{destinationAddress}}
+				</div>
+				<div v-if="txDestinationName !== null" class="message">
+					<b>{{ $t("sendPage.sendBlock.address.fundsTo") }}: </b>{{txDestinationName}}
+				</div>
+				<div v-if="txDescription !== null" class="message">
+					<b>{{ $t("sendPage.sendBlock.address.description") }}: </b>{{txDescription}}
+				</div>
+			</div>
+
+			<div class="field">
+				<label>{{ $t("sendPage.sendBlock.amount.label") }}</label>
+				<input class="amountInput" type="text" v-model="amountToSend" placeholder="0.00" :readonly="lockedForm"/>
+				<div v-if="!amountToSendValid && amountToSend != ''" class="message error">
+					{{ $t("sendPage.sendBlock.amount.invalid") }}
+				</div>
+			</div>
+
+			<div class="field" v-if="!pqWallet">
+				<label>{{ $t("sendPage.sendBlock.paymentId.label") }}</label>
+				<input class="amountInput" type="text" v-model="paymentId" placeholder="" :readonly="lockedForm"/>
+				<div v-if="!paymentIdValid && paymentId != ''" class="message error">
+					{{ $t("sendPage.sendBlock.paymentId.invalid") }}
+				</div>
+			</div>
+
+			<div class="advancedBlock">
+				<button type="button" class="advancedToggle" @click="advancedOpen = !advancedOpen" :aria-expanded="advancedOpen ? 'true' : 'false'">
+					<i class="fa" :class="advancedOpen ? 'fa-chevron-up' : 'fa-chevron-down'" aria-hidden="true"></i>
+					<span>{{ $t("sendPage.sendBlock.advanced.title") }}</span>
+				</button>
+
+				<div class="advancedFields" v-if="advancedOpen">
+					<div class="field" v-if="!pqWallet">
+						<label>{{ $t("sendPage.sendBlock.mixin.label") }}</label>
+						<!-- Triptych supports ring sizes 1, 4, 8 and 16 only. Ring 1 is the
+						     v5+ coinbase Schnorr-branch carve-out and is selected
+						     automatically by the wallet for unmixable mining outputs;
+						     the user only picks among the privacy-preserving choices. -->
+						<select class="amountInput" v-model="ringSize" :disabled="lockedForm">
+							<option value="4">4</option>
+							<option value="8">8</option>
+							<option value="16">16</option>
+						</select>
+						<div v-if="!ringSizeIsValid && ringSize != ''" class="message error">
+							{{ $t("sendPage.sendBlock.mixin.invalid") }}
+						</div>
+					</div>
+
+					<div class="field">
+						<label>{{ $t("sendPage.sendBlock.fee.label") }}</label>
+						<input class="amountInput" type="number" :min="minimumFee" max="0.1" :step="minimumFee" v-model="fee" :placeholder="minimumFee" :readonly="lockedForm"/>
+						<div v-if="!feeIsValid && fee != ''" class="message error">
+							{{ $t("sendPage.sendBlock.fee.invalid") }}
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="tc" style="margin-top:0.5rem;">
+				<button type="button" class="btn primary" style="width:100%;" @click="send()" :disabled="sending || !destinationAddressValid || !amountToSendValid || !paymentIdValid || !ringSizeIsValid || !feeIsValid">
+					<i v-if="sending" class="fa fa-spinner fa-spin" style="margin-right:0.4rem;" aria-hidden="true"></i>{{ $t("sendPage.sendBlock.sendButton") }}
+				</button>
+			</div>
+			<div class="tc" style="margin-top:0.5rem;" v-if="lockedForm">
+				<button type="button" class="btn basic" style="width:100%;" @click="reset()">{{ $t("sendPage.sendBlock.cancelButton") }}</button>
+			</div>
+		</div>
+	</div>
+
+	<div class="qrCodeScanningContainer" :class="(qrScanning ? '' : 'hidden')">
+		<div class="close" @click="stopScan()">
+			<i class="fa fa-close" aria-hidden="true"></i>
+		</div>
+		<h2>{{ $t("sendPage.qrCodeScanning.explication") }}</h2>
+		<div class="videoContainer">
+			<video width="100" id="cameraVideoFluxForDelivery" autoplay></video>
+		</div>
+	</div>
+</div>

@@ -1,0 +1,76 @@
+{
+    "name": "discrete-webwallet",
+    "version": "0.1.0",
+    "description": "Client-side browser wallet for Discrete",
+    "scripts": {
+        "start": "serve .\\src\\",
+        "build": "node ./node_modules/typescript/bin/tsc --project tsconfig.prod.json && node build.js && serve .\\src\\",
+        "test": "node --test tests/*.test.mjs",
+        "build:web": "node ./node_modules/typescript/bin/tsc --project tsconfig.prod.json && node build.js && serve .\\src\\",
+        "desktop:start": "electron desktop/main.js",
+        "desktop:dist": "electron-builder --win portable",
+        "desktop:dist:dir": "electron-builder --win dir",
+        "desktop:pack": "electron-packager . \"Discrete Wallet\" --platform=win32 --arch=x64 --icon=src/assets/img/favicon.ico --out dist-desktop-packager --overwrite --prune=true",
+        "android:sync": "npx cap sync android",
+        "android:open": "npx cap open android",
+        "android:build": "node node_modules/typescript/bin/tsc --project tsconfig.prod.json && npx cap sync android"
+    },
+    "main": "desktop/main.js",
+    "dependencies": {
+        "@capacitor/android": "^8.3.0",
+        "@capacitor/cli": "^8.3.0",
+        "@capacitor/core": "^8.3.0",
+        "@noble/post-quantum": "^0.6.1",
+        "typescript": "^5.0.4",
+        "workbox-build": "^6.5.4"
+    },
+    "devDependencies": {
+        "@oqs/liboqs-js": "^0.15.1",
+        "electron": "^31.7.7",
+        "electron-builder": "^24.13.3",
+        "electron-packager": "^17.1.2",
+        "esbuild": "^0.25.6",
+        "serve": "^14.2.6"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/discrete-cash/discrete-webwallet.git"
+    },
+    "author": "The Discrete developers; based on karbo-webwallet-js",
+    "license": "BSD-3",
+    "bugs": {
+        "url": "https://github.com/discrete-cash/discrete-webwallet/issues"
+    },
+    "homepage": "https://github.com/discrete-cash/discrete-webwallet#readme",
+    "build": {
+        "appId": "cash.discrete.wallet",
+        "productName": "Discrete Wallet",
+        "directories": {
+            "output": "dist-desktop",
+            "buildResources": "build"
+        },
+        "files": [
+            "desktop/**/*",
+            "src/**/*",
+            "package.json"
+        ],
+        "asar": true,
+        "mac": {
+            "icon": "build/icon.icns"
+        },
+        "linux": {
+            "icon": "src/assets/img/icons"
+        },
+        "win": {
+            "icon": "src/assets/img/favicon.ico",
+            "target": [
+                {
+                    "target": "portable",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ]
+        }
+    }
+}

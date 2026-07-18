@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+	<title>Discrete Wallet</title>
+	<meta property="og:title" content="Discrete Wallet" />
+
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+	<meta http-equiv="Content-Security-Policy" content="default-src *  data: blob: filesystem: about: ws: wss: 'unsafe-inline' 'unsafe-eval' 'unsafe-dynamic'; script-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src * data: blob: 'unsafe-inline'; img-src * data: blob: 'unsafe-inline'; frame-src * data: blob: ; style-src * data: blob: 'unsafe-inline'; font-src * data: blob: 'unsafe-inline';">
+
+	<meta name="referrer" content="none">
+	<meta name="msapplication-tap-highlight" content="no">
+
+	<link rel="stylesheet" href="assets/css/main.css" />
+	<link rel="stylesheet" href="assets/css/font-awesome.min.css" />
+
+	<link rel="manifest" href="/manifest.json">
+
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-status-bar-style" content="black">
+	<meta name="apple-mobile-web-app-title" content="Discrete Wallet">
+
+	<link rel="icon" href="./assets/img/favicon.ico" />
+	<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+	<link rel="icon" type="image/svg+xml" href="assets/img/coin_logo.svg">
+
+	<meta name="msapplication-TileColor" content="#0d1115">
+	<meta name="theme-color" content="#0d1115">
+
+	<meta name="description" content="Discrete client-side web wallet" />
+	<meta property="og:type" content="website" />
+	<meta property="og:url" content="https://wallet.discrete.cash/" />
+	<meta property="og:image" content="https://discrete.cash/assets/discrete-logo.png" />
+	<meta property="twitter:card" content="summary" />
+	<meta property="twitter:creator" content="@krbcoin" />
+
+	<meta name="fragment" content="!">
+
+</head>
+<body class="menuDisabled">
+
+<!-- Top Header Bar -->
+<div id="topHeader" v-cloak="">
+	<div class="topHeader-inner">
+		<a href="#!index" class="topHeader-logo">
+			<img src="./assets/img/coin_logo.svg" alt="&#1180;" style="border-radius:50%;"/>
+			<span id="websiteTitle">{{ $t("website.title") }}</span>
+		</a>
+		<div class="topHeader-right">
+			<span class="syncStatus" id="syncStatus" :class="syncStatusClass" :title="syncStatusTitle">{{ syncStatusText }}</span>
+			<a href="#!index" class="topHeader-btn onlyWhenConnected" :title="$t('walletVault.title')"><i class="fa fa-briefcase" aria-hidden="true"></i></a>
+			<a href="#!settings" class="topHeader-btn onlyWhenConnected" :title="$t('menu.settings')"><i class="fa fa-cog" aria-hidden="true"></i></a>
+			<a href="#!export" class="topHeader-btn onlyWhenConnected" :title="$t('menu.export')"><i class="fa fa-download" aria-hidden="true"></i></a>
+			<a href="#!disconnect" class="topHeader-btn onlyWhenConnected" :title="$t('menu.disconnect')"><i class="fa fa-sign-out" aria-hidden="true"></i></a>
+		</div>
+	</div>
+</div>
+
+<!-- Main Content Area -->
+<div id="appShell">
+	<div id="pageLoading">
+		<div class="spinner"></div>
+	</div>
+
+	<div id="page"></div>
+</div>
+
+<!-- Bottom Navigation - only visible when connected -->
+<nav id="bottomNav" class="onlyWhenConnected">
+	<a href="#!account" class="nav-item" data-page="account">
+		<i class="fa fa-bank" aria-hidden="true"></i>
+		<span>{{ $t("menu.overview") }}</span>
+	</a>
+	<a href="#!send" class="nav-item notViewOnlyWallet" data-page="send">
+		<i class="fa fa-paper-plane" aria-hidden="true"></i>
+		<span>{{ $t("menu.send") }}</span>
+	</a>
+	<a href="#!receive" class="nav-item" data-page="receive">
+		<i class="fa fa-qrcode" aria-hidden="true"></i>
+		<span>{{ $t("menu.receive") }}</span>
+	</a>
+	<a href="#!transactions" class="nav-item" data-page="transactions">
+		<i class="fa fa-list" aria-hidden="true"></i>
+		<span>{{ $t("menu.transactions") }}</span>
+	</a>
+</nav>
+
+<!-- Footer - only on non-connected pages -->
+<div id="copyright" v-cloak="">
+	<div class="copyright-inner">
+		<div>&copy; 2026 wallet.discrete.cash</div>
+		<div class="links">
+			<select v-model="language" class="hideOnNative">
+				<option value="en">English</option>
+			</select>
+			<a href="#!termsOfUse">{{ $t("bottom.termsOfUse") }}</a>
+			<a href="#!privacyPolicy">{{ $t("bottom.privacyPolicy") }}</a>
+			<a href="#!forgotPassword">{{ $t("bottom.help") }}</a>
+			<a class="hideOnNative" href="https://github.com/discrete-cash/discrete-webwallet" target="_blank">GitHub</a>
+		</div>
+	</div>
+</div>
+
+<script src="lib/polyfills/core.min.js"></script>
+<script src="lib/polyfills/textEncoding/encoding-indexes.js"></script>
+<script src="lib/polyfills/textEncoding/encoding.js"></script>
+<script src="lib/polyfills/crypto.js"></script>
+
+<script src="lib/biginteger.js"></script>
+<script src="config.js"></script>
+<script src="lib/vue.min.js"></script>
+<script src="lib/vue-i18n.js"></script>
+<script src="lib/jquery-3.2.1.min.js"></script>
+<script src="lib/sweetalert2.js"></script>
+<script src="lib/sha3.js"></script>
+<script src="lib/crypto.js"></script>
+<script src="lib/kjua-0.1.1.min.js"></script>
+<script src="lib/nacl-fast.js"></script>
+<script src="lib/nacl-util.min.js"></script>
+<script src="lib/base58.js"></script>
+<script src="lib/jspdf.min.js"></script>
+<script src="lib/cn_utils_native.js"></script>
+<script src="lib/FileSaver.min.js"></script>
+<script src="lib/discrete-runtime.js"></script>
+<script data-main="index.js" src="lib/require.js"></script>
+
+</body>
+</html>
