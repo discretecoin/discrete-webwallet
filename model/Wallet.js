@@ -1,0 +1,521 @@
+/*
+ * Copyright (c) 2018, Gnock
+ * Copyright (c) 2018, The Masari Project
+ *
+ * Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+ *
+ * 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+ *
+ * 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+var __extends = (this && this.__extends) || (function () {
+    var extendStatics = function (d, b) {
+        extendStatics = Object.setPrototypeOf ||
+            ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
+            function (d, b) { for (var p in b) if (Object.prototype.hasOwnProperty.call(b, p)) d[p] = b[p]; };
+        return extendStatics(d, b);
+    };
+    return function (d, b) {
+        if (typeof b !== "function" && b !== null)
+            throw new TypeError("Class extends value " + String(b) + " is not a constructor or null");
+        extendStatics(d, b);
+        function __() { this.constructor = d; }
+        d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
+    };
+})();
+define(["require", "exports", "./Transaction", "./KeysRepository", "../lib/numbersLab/Observable", "./Cn"], function (require, exports, Transaction_1, KeysRepository_1, Observable_1, Cn_1) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.Wallet = exports.WalletOptions = void 0;
+    var WalletOptions = /** @class */ (function () {
+        function WalletOptions() {
+            this.checkMinerTx = false;
+            this.readSpeed = 10;
+            this.customNode = false;
+            this.nodeUrl = 'http://127.0.0.1:9331/';
+        }
+        WalletOptions.fromRaw = function (raw) {
+            var options = new WalletOptions();
+            if (typeof raw.checkMinerTx !== 'undefined')
+                options.checkMinerTx = raw.checkMinerTx;
+            if (typeof raw.readSpeed !== 'undefined')
+                options.readSpeed = raw.readSpeed;
+            if (typeof raw.customNode !== 'undefined')
+                options.customNode = raw.customNode;
+            if (typeof raw.nodeUrl !== 'undefined')
+                options.nodeUrl = raw.nodeUrl;
+            return options;
+        };
+        WalletOptions.prototype.exportToJson = function () {
+            var data = {
+                readSpeed: this.readSpeed,
+                checkMinerTx: this.checkMinerTx,
+                customNode: this.customNode,
+                nodeUrl: this.nodeUrl
+            };
+            return data;
+        };
+        return WalletOptions;
+    }());
+    exports.WalletOptions = WalletOptions;
+    var Wallet = /** @class */ (function (_super) {
+        __extends(Wallet, _super);
+        function Wallet() {
+            var _this = _super !== null && _super.apply(this, arguments) || this;
+            // lastHeight : number = 114000;
+            // lastHeight : number = 75900;
+            // private _lastHeight : number = 50000;
+            _this._lastHeight = 0;
+            _this.transactions = [];
+            _this.txsMem = [];
+            _this.modified = true;
+            _this.modifiedTS = new Date();
+            _this.creationHeight = 0;
+            _this.txPrivateKeys = {};
+            _this.coinAddressPrefix = config.addressPrefix;
+            _this.pqMasterSeed = null;
+            _this.pqAddress = null;
+            _this.pqState = null;
+            _this.pqMempoolState = null;
+            _this._options = new WalletOptions();
+            _this.signalChanged = function () {
+                _this.modifiedTS = new Date();
+                _this.modified = true;
+                _this.notify(Observable_1.Observable.EVENT_MODIFIED);
+            };
+            _this.keyImages = [];
+            _this.txOutIndexes = [];
+            _this.clearTransactions = function () {
+                _this.txsMem = [];
+                _this.transactions = [];
+                _this.recalculateKeyImages();
+                _this.notify();
+            };
+            _this.resetScanHeight = function () {
+                _this.lastHeight = _this.creationHeight;
+                _this.signalChanged();
+                _this.notify();
+            };
+            /** Remove all derived chain history while retaining keys and settings. */
+            _this.resetHistory = function () {
+                _this.txsMem = [];
+                _this.transactions = [];
+                _this.txPrivateKeys = {};
+                _this.pqMempoolState = null;
+                if (_this.pqMasterSeed !== null) {
+                    if (_this.pqState !== null && typeof _this.pqState.reset === 'function')
+                        _this.pqState.reset(_this.creationHeight);
+                    else
+                        _this.pqState = new DiscreteRuntime.DiscreteWalletState(_this.creationHeight);
+                }
+                _this._lastHeight = _this.creationHeight;
+                _this.recalculateKeyImages();
+                _this.signalChanged();
+            };
+            return _this;
+        }
+        Wallet.prototype.exportToRaw = function () {
+            var transactions = [];
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var transaction = _a[_i];
+                transactions.push(transaction.export());
+            }
+            var data = {
+                transactions: transactions,
+                txPrivateKeys: this.txPrivateKeys,
+                lastHeight: this._lastHeight,
+                nonce: '',
+                options: this._options,
+                coinAddressPrefix: this.coinAddressPrefix
+            };
+            data.keys = this.keys;
+            if (this.pqMasterSeed !== null)
+                data.pqMasterSeed = this.pqMasterSeed;
+            if (this.pqAddress !== null)
+                data.pqAddress = this.pqAddress;
+            if (this.pqState !== null)
+                data.pqState = this.pqState.toJSON();
+            if (this.creationHeight !== 0)
+                data.creationHeight = this.creationHeight;
+            return data;
+        };
+        Wallet.loadFromRaw = function (raw) {
+            logDebugMsg("Wallet.loadFromRaw");
+            var wallet = new Wallet();
+            wallet.transactions = [];
+            for (var _i = 0, _a = raw.transactions; _i < _a.length; _i++) {
+                var rawTransac = _a[_i];
+                wallet.transactions.push(Transaction_1.Transaction.fromRaw(rawTransac));
+            }
+            wallet._lastHeight = raw.lastHeight;
+            if (typeof raw.encryptedKeys === 'string' && raw.encryptedKeys !== '') {
+                if (raw.encryptedKeys.length === 128) {
+                    var privView = raw.encryptedKeys.substr(0, 64);
+                    var privSpend = raw.encryptedKeys.substr(64, 64);
+                    wallet.keys = KeysRepository_1.KeysRepository.fromPriv(privSpend, privView);
+                }
+                else {
+                    var privView = raw.encryptedKeys.substr(0, 64);
+                    var pubViewKey = raw.encryptedKeys.substr(64, 64);
+                    var pubSpendKey = raw.encryptedKeys.substr(128, 64);
+                    wallet.keys = {
+                        pub: {
+                            view: pubViewKey,
+                            spend: pubSpendKey
+                        },
+                        priv: {
+                            view: privView,
+                            spend: '',
+                        }
+                    };
+                }
+            }
+            else if (typeof raw.keys !== 'undefined') {
+                wallet.keys = raw.keys;
+            }
+            if (typeof raw.creationHeight !== 'undefined')
+                wallet.creationHeight = raw.creationHeight;
+            if (typeof raw.options !== 'undefined')
+                wallet._options = WalletOptions.fromRaw(raw.options);
+            if (typeof raw.txPrivateKeys !== 'undefined')
+                wallet.txPrivateKeys = raw.txPrivateKeys;
+            if (typeof raw.coinAddressPrefix !== 'undefined')
+                wallet.coinAddressPrefix = raw.coinAddressPrefix;
+            else
+                wallet.coinAddressPrefix = config.addressPrefix;
+            if (typeof raw.coinAddressPrefix !== 'undefined')
+                wallet.coinAddressPrefix = raw.coinAddressPrefix;
+            else
+                wallet.coinAddressPrefix = config.addressPrefix;
+            if (typeof raw.pqMasterSeed === 'string')
+                wallet.pqMasterSeed = raw.pqMasterSeed;
+            if (typeof raw.pqAddress === 'string')
+                wallet.pqAddress = raw.pqAddress;
+            if (typeof raw.pqState !== 'undefined')
+                wallet.pqState = DiscreteRuntime.DiscreteWalletState.fromJSON(raw.pqState);
+            if (wallet.pqMasterSeed !== null && wallet.pqState === null)
+                wallet.pqState = new DiscreteRuntime.DiscreteWalletState();
+            if (wallet.pqMasterSeed === null)
+                wallet.recalculateKeyImages();
+            return wallet;
+        };
+        Wallet.prototype.initializePq = function (masterSeed, testnet) {
+            if (testnet === void 0) { testnet = false; }
+            var derived = DiscreteRuntime.deriveWalletKeys(masterSeed);
+            var toHex = function (value) { return Array.prototype.map.call(value, function (byte) { return ('0' + byte.toString(16)).slice(-2); }).join(''); };
+            this.pqMasterSeed = toHex(masterSeed);
+            this.pqAddress = DiscreteRuntime.encodeAddress(derived.viewPublicKey, derived.spendPublicKey, config.addressPrefix, testnet);
+            this.pqState = new DiscreteRuntime.DiscreteWalletState();
+            this.keys = { pub: { view: toHex(derived.viewPublicKey), spend: toHex(derived.spendPublicKey) },
+                priv: { view: toHex(derived.viewSecretKey), spend: toHex(derived.spendSecretKey) } };
+        };
+        Wallet.prototype.isViewOnly = function () {
+            return this.keys.priv.spend === '';
+        };
+        Object.defineProperty(Wallet.prototype, "lastHeight", {
+            get: function () {
+                return this._lastHeight;
+            },
+            set: function (value) {
+                var modified = value !== this._lastHeight;
+                this._lastHeight = value;
+                if (modified)
+                    this.notify();
+            },
+            enumerable: false,
+            configurable: true
+        });
+        Object.defineProperty(Wallet.prototype, "options", {
+            get: function () {
+                return this._options;
+            },
+            set: function (value) {
+                this._options = value;
+                this.signalChanged();
+            },
+            enumerable: false,
+            configurable: true
+        });
+        Wallet.prototype.getAll = function (forceReload) {
+            if (forceReload === void 0) { forceReload = false; }
+            return this.transactions.slice();
+        };
+        Wallet.prototype.getAllOuts = function () {
+            var alls = this.getAll();
+            var outs = [];
+            for (var _i = 0, alls_1 = alls; _i < alls_1.length; _i++) {
+                var tr = alls_1[_i];
+                outs.push.apply(outs, tr.outs);
+            }
+            return outs;
+        };
+        Wallet.prototype.addNew = function (transaction, replace) {
+            if (replace === void 0) { replace = true; }
+            var exist = this.findWithTxPubKey(transaction.txPubKey);
+            if (!exist || replace) {
+                if (!exist) {
+                    this.transactions.push(transaction);
+                }
+                else {
+                    for (var tr = 0; tr < this.transactions.length; ++tr) {
+                        if (this.transactions[tr].txPubKey === transaction.txPubKey) {
+                            this.transactions[tr] = transaction;
+                        }
+                    }
+                }
+                // remove from unconfirmed
+                var existMem = this.findMemWithTxPubKey(transaction.txPubKey);
+                if (existMem) {
+                    var trIndex = this.txsMem.indexOf(existMem);
+                    if (trIndex != -1) {
+                        this.txsMem.splice(trIndex, 1);
+                    }
+                }
+                // this.saveAll();
+                this.recalculateKeyImages();
+                this.signalChanged();
+                this.notify();
+            }
+        };
+        Wallet.prototype.findWithTxPubKey = function (pubKey) {
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var tr = _a[_i];
+                if (tr.txPubKey === pubKey)
+                    return tr;
+            }
+            return null;
+        };
+        Wallet.prototype.findMemWithTxPubKey = function (pubKey) {
+            for (var _i = 0, _a = this.txsMem; _i < _a.length; _i++) {
+                var tr = _a[_i];
+                if (tr.txPubKey === pubKey)
+                    return tr;
+            }
+            return null;
+        };
+        Wallet.prototype.findWithTxHash = function (hash) {
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var tr = _a[_i];
+                if (tr.hash === hash)
+                    return tr;
+            }
+            for (var _b = 0, _c = this.txsMem; _b < _c.length; _b++) {
+                var tr = _c[_b];
+                if (tr.hash === hash)
+                    return tr;
+            }
+            return null;
+        };
+        Wallet.prototype.findTxPrivateKeyWithHash = function (hash) {
+            if (typeof this.txPrivateKeys[hash] !== 'undefined')
+                return this.txPrivateKeys[hash];
+            return null;
+        };
+        Wallet.prototype.addTxPrivateKeyWithTxHash = function (txHash, txPrivKey) {
+            this.txPrivateKeys[txHash] = txPrivKey;
+            this.signalChanged();
+        };
+        Wallet.prototype.getTransactionKeyImages = function () {
+            return this.keyImages;
+        };
+        Wallet.prototype.getTransactionOutIndexes = function () {
+            return this.txOutIndexes;
+        };
+        Wallet.prototype.getOutWithGlobalIndex = function (index) {
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var tx = _a[_i];
+                for (var _b = 0, _c = tx.outs; _b < _c.length; _b++) {
+                    var out = _c[_b];
+                    if (out.globalIndex === index)
+                        return out;
+                }
+            }
+            return null;
+        };
+        Wallet.prototype.recalculateKeyImages = function () {
+            var keys = [];
+            var indexes = [];
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var transaction = _a[_i];
+                for (var _b = 0, _c = transaction.outs; _b < _c.length; _b++) {
+                    var out = _c[_b];
+                    if (out.keyImage !== null && out.keyImage !== '')
+                        keys.push(out.keyImage);
+                    if (out.globalIndex !== 0)
+                        indexes.push(out.globalIndex);
+                }
+            }
+            this.keyImages = keys;
+            this.txOutIndexes = indexes;
+        };
+        Wallet.prototype.getTransactionsCopy = function () {
+            if (this.pqState !== null) {
+                var rows = this.pqState.history.slice();
+                if (this.pqMempoolState !== null)
+                    rows = rows.concat(this.pqMempoolState.history.slice(this.pqState.history.length));
+                return rows.map(function (row) {
+                    var transaction = new Transaction_1.Transaction();
+                    transaction.hash = row.transactionHash;
+                    transaction.txPubKey = row.transactionHash;
+                    transaction.blockHeight = row.blockHeight;
+                    transaction.timestamp = row.timestamp;
+                    transaction.is_coinbase = row.coinbase;
+                    if (row.credited > BigInt(0)) {
+                        var output = new Transaction_1.TransactionOut();
+                        output.amount = Number(row.credited);
+                        transaction.outs.push(output);
+                    }
+                    if (row.debited > BigInt(0)) {
+                        var input = new Transaction_1.TransactionIn();
+                        input.amount = Number(row.debited);
+                        transaction.ins.push(input);
+                    }
+                    return transaction;
+                }).sort(function (a, b) { return a.timestamp - b.timestamp; });
+            }
+            var news = [];
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var transaction = _a[_i];
+                news.push(Transaction_1.Transaction.fromRaw(transaction.export()));
+            }
+            news.sort(function (a, b) {
+                return a.timestamp - b.timestamp;
+            });
+            return news;
+        };
+        Wallet.prototype.totalAmount = function () {
+            if (this.pqState !== null)
+                return Number((this.pqMempoolState || this.pqState).balance());
+            var amount = 0;
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var transaction = _a[_i];
+                if (!transaction.isFullyChecked())
+                    continue;
+                amount += transaction.getAmount();
+            }
+            for (var _b = 0, _c = this.txsMem; _b < _c.length; _b++) {
+                var transaction = _c[_b];
+                if (!transaction.isFullyChecked())
+                    continue;
+                amount += transaction.getAmount();
+            }
+            return amount;
+        };
+        Wallet.prototype.spentKeyImages = function () {
+            var spentKeyImages = {};
+            for (var _i = 0, _a = this.transactions.concat(this.txsMem); _i < _a.length; _i++) {
+                var transaction = _a[_i];
+                if (!transaction.isFullyChecked())
+                    continue;
+                for (var _b = 0, _c = transaction.ins; _b < _c.length; _b++) {
+                    var input = _c[_b];
+                    if (input.keyImage !== '')
+                        spentKeyImages[input.keyImage] = true;
+                }
+            }
+            return spentKeyImages;
+        };
+        Wallet.prototype.unlockedAmount = function (currentBlockHeight) {
+            if (currentBlockHeight === void 0) { currentBlockHeight = -1; }
+            if (this.pqState !== null)
+                return Number((this.pqMempoolState || this.pqState).spendableBalance(currentBlockHeight < 0 ? this.lastHeight : currentBlockHeight));
+            var amount = 0;
+            var spentKeyImages = this.spentKeyImages();
+            for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                var transaction = _a[_i];
+                if (!transaction.isFullyChecked())
+                    continue;
+                if (currentBlockHeight !== -1 && !transaction.isConfirmed(currentBlockHeight))
+                    continue;
+                for (var _b = 0, _c = transaction.outs; _b < _c.length; _b++) {
+                    var out = _c[_b];
+                    if (out.keyImage !== '' && spentKeyImages[out.keyImage])
+                        continue;
+                    amount += out.amount;
+                }
+            }
+            return amount;
+        };
+        Wallet.prototype.hasBeenModified = function () {
+            return this.modified;
+        };
+        Wallet.prototype.getPublicAddress = function () {
+            if (this.pqAddress !== null)
+                return this.pqAddress;
+            return Cn_1.Cn.pubkeys_to_string(this.keys.pub.spend, this.keys.pub.view);
+        };
+        Wallet.prototype.recalculateIfNotViewOnly = function () {
+            if (!this.isViewOnly()) {
+                for (var _i = 0, _a = this.transactions; _i < _a.length; _i++) {
+                    var tx = _a[_i];
+                    var needDerivation = false;
+                    for (var _b = 0, _c = tx.outs; _b < _c.length; _b++) {
+                        var out = _c[_b];
+                        if (out.keyImage === '') {
+                            needDerivation = true;
+                            break;
+                        }
+                    }
+                    if (needDerivation) {
+                        var derivation = '';
+                        try {
+                            derivation = Cn_1.CnNativeBride.generate_key_derivation(tx.txPubKey, this.keys.priv.view);
+                        }
+                        catch (e) {
+                            continue;
+                        }
+                        for (var _d = 0, _e = tx.outs; _d < _e.length; _d++) {
+                            var out = _e[_d];
+                            if (out.keyImage === '') {
+                                var m_key_image = Cn_1.CnTransactions.generate_key_image_helper({
+                                    view_secret_key: this.keys.priv.view,
+                                    spend_secret_key: this.keys.priv.spend,
+                                    public_spend_key: this.keys.pub.spend,
+                                }, tx.txPubKey, out.outputIdx, derivation);
+                                out.keyImage = m_key_image.key_image;
+                                out.ephemeralPub = m_key_image.ephemeral_pub;
+                                this.signalChanged();
+                            }
+                        }
+                    }
+                }
+                if (this.modified)
+                    this.recalculateKeyImages();
+                for (var iTx = 0; iTx < this.transactions.length; ++iTx) {
+                    for (var iIn = 0; iIn < this.transactions[iTx].ins.length; ++iIn) {
+                        var vin = this.transactions[iTx].ins[iIn];
+                        if (vin.amount < 0) {
+                            if (this.keyImages.indexOf(vin.keyImage) != -1) {
+                                //console.log('found in', vin);
+                                var walletOuts = this.getAllOuts();
+                                for (var _f = 0, walletOuts_1 = walletOuts; _f < walletOuts_1.length; _f++) {
+                                    var ut = walletOuts_1[_f];
+                                    if (ut.keyImage == vin.keyImage) {
+                                        this.transactions[iTx].ins[iIn].amount = ut.amount;
+                                        this.transactions[iTx].ins[iIn].keyImage = ut.keyImage;
+                                        this.signalChanged();
+                                        break;
+                                    }
+                                }
+                            }
+                            else {
+                                this.transactions[iTx].ins.splice(iIn, 1);
+                                --iIn;
+                            }
+                        }
+                    }
+                    if (this.transactions[iTx].outs.length === 0 && this.transactions[iTx].ins.length === 0) {
+                        this.transactions.splice(iTx, 1);
+                        --iTx;
+                    }
+                }
+            }
+        };
+        return Wallet;
+    }(Observable_1.Observable));
+    exports.Wallet = Wallet;
+});

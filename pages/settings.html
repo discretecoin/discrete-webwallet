@@ -1,0 +1,102 @@
+<div id="app" class="body-root" v-cloak="">
+	<div class="body-header">
+		<div class="header-title">
+			<i class="fa fa-cog" aria-hidden="true"></i> {{ $t("settingsPage.title") }}
+		</div>
+		<div class="header-subtitle">{{ $t("settingsPage.subtitle") }}</div>
+	</div>
+
+	<!-- Version Info -->
+	<div class="card" v-if="nativeVersionCode !== 0" style="background:transparent;border-color:var(--color-border);">
+		<div style="font-size:0.8125rem;color:var(--color-text-muted);">
+			<div>{{ $t("settingsPage.versionBlock.versionNumber") }}{{nativeVersionNumber}}</div>
+			<div>{{ $t("settingsPage.versionBlock.versionCode") }}{{nativeVersionCode}}</div>
+		</div>
+	</div>
+
+	<!-- Language -->
+	<div class="card">
+		<div class="card-title">{{ $t("settingsPage.settingsBlock.language.label") }}</div>
+		<div class="field">
+			<select v-model="language">
+				<option value="en">English</option>
+			</select>
+		</div>
+	</div>
+
+	<!-- Theme -->
+	<div class="card">
+		<div class="card-title">{{ $t("settingsPage.settingsBlock.theme.label") }}</div>
+		<div class="field">
+			<select v-model="theme">
+				<option value="dark">{{ $t("settingsPage.settingsBlock.theme.dark") }}</option>
+				<option value="light">{{ $t("settingsPage.settingsBlock.theme.light") }}</option>
+			</select>
+		</div>
+	</div>
+
+	<!-- Local Storage Status -->
+	<div class="card">
+		<div class="card-title">{{ $t("settingsPage.localWalletStorage.title") }}</div>
+		<div style="color:var(--color-text-muted);font-size:0.8125rem;line-height:1.6;">
+			<div style="color:var(--color-text);font-weight:600;margin-bottom:0.5rem;">{{ $t(storageProtectionKey) }}</div>
+			<div v-html="$t('walletVault.storageNotice.content')"></div>
+			<br/>
+			{{ $t("settingsPage.localWalletStorage.protectionNote") }}
+		</div>
+	</div>
+
+	<!-- Node Settings -->
+	<div class="card">
+		<div class="card-title">{{ $t("settingsPage.settingsBlock.customNode.label") }}</div>
+		<div class="field checkbox toggle">
+			<input type="checkbox" v-model="customNode">
+			<label>{{ $t("settingsPage.settingsBlock.customNode.label") }}</label>
+		</div>
+		<div class="field" v-if="customNode">
+			<label>{{ $t("settingsPage.settingsBlock.nodeUrl.label") }}</label>
+			<input type="url" v-model="nodeUrl" />
+		</div>
+		<button v-if="customNode" @click="updateConnectionSettings()" class="btn" style="width:100%;">{{ $t("settingsPage.walletSettings.updateButton") }}</button>
+	</div>
+
+	<!-- Sync Settings -->
+	<div class="card">
+		<div class="card-title">{{ $t("settingsPage.settingsBlock.speed.label") }}</div>
+		<div class="field">
+			<select v-model="readSpeed">
+				<option value="2">{{ $t("settingsPage.settingsBlock.speed.fastest") }}</option>
+				<option value="10">{{ $t("settingsPage.settingsBlock.speed.fast") }}</option>
+				<option value="50">{{ $t("settingsPage.settingsBlock.speed.medium") }}</option>
+				<option value="100">{{ $t("settingsPage.settingsBlock.speed.slow") }}</option>
+			</select>
+		</div>
+		<div class="field checkbox toggle">
+			<input type="checkbox" v-model="checkMinerTx">
+			<label>{{ $t("settingsPage.settingsBlock.readMinerTx.label") }}</label>
+		</div>
+	</div>
+
+	<!-- Wallet Heights -->
+	<div class="card">
+		<div class="card-title">{{ $t("settingsPage.walletSettings.creationHeight.label") }}</div>
+		<div class="field">
+			<label>{{ $t("settingsPage.walletSettings.creationHeight.label") }}</label>
+			<input type="number" v-model="creationHeight" />
+		</div>
+		<div class="field">
+			<label>{{ $t("settingsPage.walletSettings.currentScanningHeight.label") }}</label>
+			<input type="number" v-model="scanHeight" />
+		</div>
+		<button @click="updateWalletSettings()" class="btn" style="width:100%;">{{ $t("settingsPage.walletSettings.updateButton") }}</button>
+	</div>
+
+	<!-- Actions -->
+	<div class="card">
+		<div style="display:flex;flex-direction:column;gap:0.5rem;">
+			<a href="#!changeWalletPassword" class="btn" style="width:100%;text-align:center;">{{ $t("settingsPage.changePasswordButton") }}</a>
+			<button class="btn" style="width:100%;" @click="resetWallet()">{{ $t("settingsPage.resetWalletButton") }}</button>
+			<button class="btn red" style="width:100%;" @click="deleteWallet()">{{ $t("walletVault.actions.remove") }}</button>
+		</div>
+	</div>
+</div>
