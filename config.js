@@ -4,9 +4,10 @@ var myGlobal = typeof window !== 'undefined' ? window : self;
 myGlobal.config = {
     debug: false,
     nodeList: [
-        "http://127.0.0.1:9331/"
+        "https://seed1.discrete.cash:9332/",
+        "https://seed2.discrete.cash:9332/"
     ],
-    nodeUrl: "",
+    nodeUrl: "https://seed2.discrete.cash:9332/",
     mainnetExplorerUrl: "https://explorer.discrete.cash/",
     mainnetExplorerUrlHash: "https://explorer.discrete.cash/transaction/{ID}",
     mainnetExplorerUrlBlock: "https://explorer.discrete.cash/block/{ID}",
