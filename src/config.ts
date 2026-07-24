@@ -3,10 +3,11 @@ let myGlobal : any = typeof window !== 'undefined' ? window : self;
 myGlobal.config = {
 	debug: false,
 	nodeList: [
+		"https://node.discrete.cash:9332/",
 		"https://seed1.discrete.cash:9332/",
 		"https://seed2.discrete.cash:9332/"
 	],
-	nodeUrl: "https://seed2.discrete.cash:9332/",
+	nodeUrl: "https://node.discrete.cash:9332/",
 	mainnetExplorerUrl: "https://explorer.discrete.cash/",
 	mainnetExplorerUrlHash: "https://explorer.discrete.cash/transaction/{ID}",
 	mainnetExplorerUrlBlock: "https://explorer.discrete.cash/block/{ID}",
