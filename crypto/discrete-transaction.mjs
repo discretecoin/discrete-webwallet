@@ -61,7 +61,7 @@ export function buildSignedTransaction({ inputs, destinations, fee, spendPublicK
   const outputs = destinations.map((destination, outputIndex) => {
     const encapsulated = ml_kem768.encapsulate(destination.viewPublicKey);
     const rho = crypto.getRandomValues(new Uint8Array(32));
-    const context = outputContext(inputsHash, encapsulated.cipherText, outputIndex, BigInt(destination.subaddressIndex || 0));
+    const context = outputContext(inputsHash, encapsulated.cipherText, outputIndex);
     const key = deriveOutputAeadKey(encapsulated.sharedSecret, context);
     const amount = BigInt(destination.amount), unlockHeight = BigInt(destination.unlockHeight || 0);
     const aad = concat(context, le64(amount));
