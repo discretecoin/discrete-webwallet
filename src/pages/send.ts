@@ -488,11 +488,24 @@ class SendView extends DestructableView {
 		try { parsedAccountNumber = DiscreteRuntime.parseAccountNumber(this.destinationAddressUser); } catch (e) {}
 		if (parsedAccountNumber !== null) {
 			this.accountNumberSubaddressIndex = parsedAccountNumber.subaddressIndex;
+			// Resolving (H,I,A) -> keys is asynchronous, but T above is applied now.
+			// Anything left over from the previously typed number is therefore already
+			// inconsistent: paying the OLD resolved address with the NEW deposit index
+			// would send someone else's money to the wrong account. Drop the
+			// destination until this number resolves on its own.
+			this.destinationAddress = '';
+			this.destinationAddressValid = false;
+			this.accountNumberAddress = null;
 			if (this.timeoutResolveAlias !== 0)
 				clearTimeout(this.timeoutResolveAlias);
 
+			// Resolve the exact string T was parsed from, and ignore the answer if the
+			// user has typed on since: clearTimeout cancels a pending debounce but not
+			// an RPC already in flight.
+			let pending = this.destinationAddressUser;
 			this.timeoutResolveAlias = <any>setTimeout(function () {
-				blockchainExplorer.resolveAccountNumber(self.destinationAddressUser).then(function (address: string) {
+				blockchainExplorer.resolveAccountNumber(pending).then(function (address: string) {
+					if (self.destinationAddressUser !== pending) return;
 					try {
 						if(wallet.pqMasterSeed !== null) DiscreteRuntime.decodeAddress(address, Boolean((<any>config).testnet));
 						else Cn.decode_address(address);
@@ -507,6 +520,7 @@ class SendView extends DestructableView {
 					}
 					self.timeoutResolveAlias = 0;
 				}).catch(function () {
+					if (self.destinationAddressUser !== pending) return;
 					self.destinationAddressValid = false;
 					self.accountNumberValid = false;
 					self.accountNumberAddress = null;
