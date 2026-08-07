@@ -36,6 +36,9 @@ let blockchainExplorer: BlockchainExplorer = BlockchainExplorerProvider.getInsta
 const RING_SIZE_CHOICES = [4, 8, 16];
 const MIN_FEE = '0.01';
 const MAX_FEE = '0.1';
+// Consensus limit on PQ transaction inputs (parameters::MAX_PQ_INPUTS_PER_TX in
+// the daemon's CryptoNoteConfig.h). Keep the two in step.
+const MAX_PQ_INPUTS_PER_TX = 32;
 
 AppState.enableLeftMenu();
 
@@ -445,15 +448,29 @@ class SendView extends DestructableView {
 			let recipient = DiscreteRuntime.decodeAddress(this.destinationAddress, Boolean((<any>config).testnet));
 			let seed = new Uint8Array((wallet.pqMasterSeed as string).match(/../g)!.map(byte => parseInt(byte, 16)));
 			let keys = DiscreteRuntime.deriveWalletKeys(seed);
+			// Consensus caps a PQ transaction at MAX_PQ_INPUTS_PER_TX inputs, and each
+			// input carries its own 3309-byte ML-DSA-65 signature. Spend the largest
+			// outputs first so the cap is reached as rarely as possible, and refuse
+			// here rather than after minutes of signing a tx the daemon will reject.
+			let spendable = wallet.pqState.outputs
+				.filter((output:any) => !output.spent && output.unlockHeight <= wallet.lastHeight)
+				.sort((a:any, b:any) => BigInt(a.amount) === BigInt(b.amount) ? 0 : (BigInt(a.amount) > BigInt(b.amount) ? -1 : 1));
+			let spendableTotal = spendable.reduce((sum:bigint, output:any) => sum + BigInt(output.amount), BigInt(0));
 			let selected:any[] = [];
 			let total = BigInt(0);
-			for(let output of wallet.pqState.outputs){
-				if(output.spent || output.unlockHeight > wallet.lastHeight) continue;
+			for(let output of spendable){
+				if(selected.length >= MAX_PQ_INPUTS_PER_TX) break;
 				selected.push(output);
 				total += BigInt(output.amount);
 				if(total >= amount + feeAmount) break;
 			}
-			if(total < amount + feeAmount) throw new Error('Not enough unlocked balance');
+			if(total < amount + feeAmount) {
+				if(spendableTotal >= amount + feeAmount)
+					throw new Error('This amount would need more than ' + MAX_PQ_INPUTS_PER_TX +
+						' inputs, which is over the per-transaction limit. Send a smaller amount, ' +
+						'or consolidate your funds by sending them to yourself first.');
+				throw new Error('Not enough unlocked balance');
+			}
 			let destinations:any[] = [{viewPublicKey:recipient.viewPublicKey, spendPublicKey:recipient.spendPublicKey,
 				amount:amount, subaddressIndex:this.accountNumberSubaddressIndex}];
 			let change = total - amount - feeAmount;
@@ -488,11 +505,24 @@ class SendView extends DestructableView {
 		try { parsedAccountNumber = DiscreteRuntime.parseAccountNumber(this.destinationAddressUser); } catch (e) {}
 		if (parsedAccountNumber !== null) {
 			this.accountNumberSubaddressIndex = parsedAccountNumber.subaddressIndex;
+			// Resolving (H,I,A) -> keys is asynchronous, but T above is applied now.
+			// Anything left over from the previously typed number is therefore already
+			// inconsistent: paying the OLD resolved address with the NEW deposit index
+			// would send someone else's money to the wrong account. Drop the
+			// destination until this number resolves on its own.
+			this.destinationAddress = '';
+			this.destinationAddressValid = false;
+			this.accountNumberAddress = null;
 			if (this.timeoutResolveAlias !== 0)
 				clearTimeout(this.timeoutResolveAlias);
 
+			// Resolve the exact string T was parsed from, and ignore the answer if the
+			// user has typed on since: clearTimeout cancels a pending debounce but not
+			// an RPC already in flight.
+			let pending = this.destinationAddressUser;
 			this.timeoutResolveAlias = <any>setTimeout(function () {
-				blockchainExplorer.resolveAccountNumber(self.destinationAddressUser).then(function (address: string) {
+				blockchainExplorer.resolveAccountNumber(pending).then(function (address: string) {
+					if (self.destinationAddressUser !== pending) return;
 					try {
 						if(wallet.pqMasterSeed !== null) DiscreteRuntime.decodeAddress(address, Boolean((<any>config).testnet));
 						else Cn.decode_address(address);
@@ -507,6 +537,7 @@ class SendView extends DestructableView {
 					}
 					self.timeoutResolveAlias = 0;
 				}).catch(function () {
+					if (self.destinationAddressUser !== pending) return;
 					self.destinationAddressValid = false;
 					self.accountNumberValid = false;
 					self.accountNumberAddress = null;

@@ -44,6 +44,9 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
     var RING_SIZE_CHOICES = [4, 8, 16];
     var MIN_FEE = '0.01';
     var MAX_FEE = '0.1';
+    // Consensus limit on PQ transaction inputs (parameters::MAX_PQ_INPUTS_PER_TX in
+    // the daemon's CryptoNoteConfig.h). Keep the two in step.
+    var MAX_PQ_INPUTS_PER_TX = 32;
     AppState_1.AppState.enableLeftMenu();
     var SendView = /** @class */ (function (_super) {
         __extends(SendView, _super);
@@ -413,19 +416,32 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
                 var recipient = DiscreteRuntime.decodeAddress(this.destinationAddress, Boolean(config.testnet));
                 var seed = new Uint8Array(wallet.pqMasterSeed.match(/../g).map(function (byte) { return parseInt(byte, 16); }));
                 var keys = DiscreteRuntime.deriveWalletKeys(seed);
+                // Consensus caps a PQ transaction at MAX_PQ_INPUTS_PER_TX inputs, and each
+                // input carries its own 3309-byte ML-DSA-65 signature. Spend the largest
+                // outputs first so the cap is reached as rarely as possible, and refuse
+                // here rather than after minutes of signing a tx the daemon will reject.
+                var spendable = wallet.pqState.outputs
+                    .filter(function (output) { return !output.spent && output.unlockHeight <= wallet.lastHeight; })
+                    .sort(function (a, b) { return BigInt(a.amount) === BigInt(b.amount) ? 0 : (BigInt(a.amount) > BigInt(b.amount) ? -1 : 1); });
+                var spendableTotal = spendable.reduce(function (sum, output) { return sum + BigInt(output.amount); }, BigInt(0));
                 var selected = [];
                 var total = BigInt(0);
-                for (var _i = 0, _a = wallet.pqState.outputs; _i < _a.length; _i++) {
-                    var output = _a[_i];
-                    if (output.spent || output.unlockHeight > wallet.lastHeight)
-                        continue;
+                for (var _i = 0, spendable_1 = spendable; _i < spendable_1.length; _i++) {
+                    var output = spendable_1[_i];
+                    if (selected.length >= MAX_PQ_INPUTS_PER_TX)
+                        break;
                     selected.push(output);
                     total += BigInt(output.amount);
                     if (total >= amount + feeAmount)
                         break;
                 }
-                if (total < amount + feeAmount)
+                if (total < amount + feeAmount) {
+                    if (spendableTotal >= amount + feeAmount)
+                        throw new Error('This amount would need more than ' + MAX_PQ_INPUTS_PER_TX +
+                            ' inputs, which is over the per-transaction limit. Send a smaller amount, ' +
+                            'or consolidate your funds by sending them to yourself first.');
                     throw new Error('Not enough unlocked balance');
+                }
                 var destinations = [{ viewPublicKey: recipient.viewPublicKey, spendPublicKey: recipient.spendPublicKey,
                         amount: amount, subaddressIndex: this.accountNumberSubaddressIndex }];
                 var change = total - amount - feeAmount;
@@ -465,10 +481,24 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
             catch (e) { }
             if (parsedAccountNumber !== null) {
                 this.accountNumberSubaddressIndex = parsedAccountNumber.subaddressIndex;
+                // Resolving (H,I,A) -> keys is asynchronous, but T above is applied now.
+                // Anything left over from the previously typed number is therefore already
+                // inconsistent: paying the OLD resolved address with the NEW deposit index
+                // would send someone else's money to the wrong account. Drop the
+                // destination until this number resolves on its own.
+                this.destinationAddress = '';
+                this.destinationAddressValid = false;
+                this.accountNumberAddress = null;
                 if (this.timeoutResolveAlias !== 0)
                     clearTimeout(this.timeoutResolveAlias);
+                // Resolve the exact string T was parsed from, and ignore the answer if the
+                // user has typed on since: clearTimeout cancels a pending debounce but not
+                // an RPC already in flight.
+                var pending_1 = this.destinationAddressUser;
                 this.timeoutResolveAlias = setTimeout(function () {
-                    blockchainExplorer.resolveAccountNumber(self.destinationAddressUser).then(function (address) {
+                    blockchainExplorer.resolveAccountNumber(pending_1).then(function (address) {
+                        if (self.destinationAddressUser !== pending_1)
+                            return;
                         try {
                             if (wallet.pqMasterSeed !== null)
                                 DiscreteRuntime.decodeAddress(address, Boolean(config.testnet));
@@ -486,6 +516,8 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
                         }
                         self.timeoutResolveAlias = 0;
                     }).catch(function () {
+                        if (self.destinationAddressUser !== pending_1)
+                            return;
                         self.destinationAddressValid = false;
                         self.accountNumberValid = false;
                         self.accountNumberAddress = null;
