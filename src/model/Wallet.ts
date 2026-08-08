@@ -67,6 +67,10 @@ export type RawWallet = {
 	pqMasterSeed?:string,
 	pqAddress?:string,
 	pqState?:any,
+	// Word list the recovery phrase shown to the user was minted in. Absent on any
+	// wallet created before phrase portability was enforced, which is exactly the
+	// signal that its backup predates the fix and is worth re-checking.
+	mnemonicLang?:string,
 }
 export type RawFullyEncryptedWallet = {
 	data:number[],
@@ -92,6 +96,8 @@ export class Wallet extends Observable{
 	pqAddress: string|null = null;
 	pqState: any = null;
 	pqMempoolState: any = null;
+	// See RawWallet.mnemonicLang. null means "unknown", not "none".
+	mnemonicLang: string|null = null;
 
 	private _options : WalletOptions = new WalletOptions();
 
@@ -120,6 +126,7 @@ export class Wallet extends Observable{
 		if(this.pqMasterSeed !== null) data.pqMasterSeed = this.pqMasterSeed;
 		if(this.pqAddress !== null) data.pqAddress = this.pqAddress;
 		if(this.pqState !== null) data.pqState = this.pqState.toJSON();
+		if(this.mnemonicLang !== null) data.mnemonicLang = this.mnemonicLang;
 
 		if(this.creationHeight !== 0) data.creationHeight = this.creationHeight;
 
@@ -171,6 +178,7 @@ export class Wallet extends Observable{
 
 		if(typeof raw.pqMasterSeed === 'string') wallet.pqMasterSeed = raw.pqMasterSeed;
 		if(typeof raw.pqAddress === 'string') wallet.pqAddress = raw.pqAddress;
+		if(typeof raw.mnemonicLang === 'string') wallet.mnemonicLang = raw.mnemonicLang;
 		if(typeof raw.pqState !== 'undefined') wallet.pqState = DiscreteRuntime.DiscreteWalletState.fromJSON(raw.pqState);
 		if(wallet.pqMasterSeed !== null && wallet.pqState === null) wallet.pqState = new DiscreteRuntime.DiscreteWalletState();
 		if(wallet.pqMasterSeed === null) wallet.recalculateKeyImages();

@@ -59,14 +59,20 @@ class ImportView extends DestructableView {
 		this.languages.push({key: 'french', name: 'French'});
 		this.languages.push({key: 'german', name: 'German'});
 		this.languages.push({key: 'italian', name: 'Italian'});
+		this.languages.push({key: 'japanese', name: 'Japanese'});
+		this.languages.push({key: 'portuguese', name: 'Portuguese'});
 		this.languages.push({key: 'russian', name: 'Russian'});
-		// Legacy only — not offered for export, cannot be restored in native wallets.
-		this.languages.push({key: 'spanish', name: 'Spanish (legacy)'});
-		this.languages.push({key: 'portuguese', name: 'Portuguese (legacy)'});
-		this.languages.push({key: 'japanese', name: 'Japanese (legacy)'});
-		this.languages.push({key: 'electrum', name: 'Electrum (legacy)'});
-		this.languages.push({key: 'esperanto', name: 'Esperanto (legacy)'});
-		this.languages.push({key: 'lojban', name: 'Lojban (legacy)'});
+		this.languages.push({key: 'spanish', name: 'Spanish'});
+		// Import-only. The first three are the word lists these languages used before
+		// they were taken over from core; the last three were never in core at all.
+		// 'Detect automatically' tries the current lists first, so these only matter
+		// for a phrase minted before the switch.
+		this.languages.push({key: 'spanish-legacy', name: 'Spanish (old phrase)'});
+		this.languages.push({key: 'portuguese-legacy', name: 'Portuguese (old phrase)'});
+		this.languages.push({key: 'japanese-legacy', name: 'Japanese (old phrase)'});
+		this.languages.push({key: 'electrum', name: 'Electrum (old phrase)'});
+		this.languages.push({key: 'esperanto', name: 'Esperanto (old phrase)'});
+		this.languages.push({key: 'lojban', name: 'Lojban (old phrase)'});
 		this.language = 'auto';
 	}
 
@@ -104,6 +110,7 @@ class ImportView extends DestructableView {
 				let newWallet = new Wallet();
 				let seed = new Uint8Array((mnemonic_decoded as string).match(/../g)!.map(byte => parseInt(byte, 16)));
 				newWallet.initializePq(seed, Boolean((<any>config).testnet));
+				newWallet.mnemonicLang = current_lang;
 
 				let height = self.importHeight - 10;
 				if (height < 0) height = 0;
@@ -170,15 +177,22 @@ class ImportView extends DestructableView {
 	}
 
 	checkMnemonicValidity() {
-		let splitted = this.mnemonicPhrase.trim().split(' ');
+		// Any run of whitespace separates words, so a phrase pasted out of a key
+		// backup or a chat message validates instead of being counted as one token.
+		let splitted = this.mnemonicPhrase.trim().split(/\s+/);
 		if (splitted.length != 25) {
 			this.validMnemonicPhrase = false;
+		} else if (this.language === 'auto') {
+			this.validMnemonicPhrase = Mnemonic.detectLang(this.mnemonicPhrase) !== null;
 		} else {
-			let detected = Mnemonic.detectLang(this.mnemonicPhrase.trim());
-			if (this.language === 'auto')
-				this.validMnemonicPhrase = detected !== null;
-			else
-				this.validMnemonicPhrase = detected === this.language;
+			// With a language chosen explicitly, ask whether the phrase decodes under
+			// THAT list rather than whether detection happens to name it. The two
+			// differ for a phrase in a retired list whose replacement shares its name.
+			try {
+				this.validMnemonicPhrase = Mnemonic.mn_decode(this.mnemonicPhrase, this.language) !== null;
+			} catch (e) {
+				this.validMnemonicPhrase = false;
+			}
 		}
 	}
 

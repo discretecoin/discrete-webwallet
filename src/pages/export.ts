@@ -20,6 +20,7 @@ import {DestructableView} from "../lib/numbersLab/DestructableView";
 import {Constants} from "../model/Constants";
 import {WalletRepository} from "../model/WalletRepository";
 import {Mnemonic} from "../model/Mnemonic";
+import {MnemonicLang} from "../model/MnemonicLang";
 
 let wallet: Wallet = DependencyInjectorInstance().getInstance(Wallet.name, 'default', false);
 let blockchainExplorer = DependencyInjectorInstance().getInstance(Constants.BLOCKCHAIN_EXPLORER);
@@ -28,6 +29,7 @@ let blockchainExplorer = DependencyInjectorInstance().getInstance(Constants.BLOC
 class ExportView extends DestructableView {
 	@VueVar('') publicAddress: string;
 	@VueVar(false) nativePlatform !: boolean;
+	@VueVar(false) phraseUnverified !: boolean;
 
 	constructor(container: string) {
 		super(container);
@@ -35,6 +37,85 @@ class ExportView extends DestructableView {
 
 		this.publicAddress = wallet.getPublicAddress();
 		this.nativePlatform = window.native;
+
+		// A wallet created before phrases were checked carries no mnemonicLang, so we
+		// cannot know which word list its backup used — prompt the holder to verify.
+		// A wallet that records a retired list is a definite problem, not a maybe.
+		this.phraseUnverified = wallet.pqMasterSeed !== null
+			&& (wallet.mnemonicLang === null || !MnemonicLang.isNativeCompatible(wallet.mnemonicLang));
+	}
+
+	// Verify a written-down phrase against the open wallet, locally.
+	//
+	// This needs no stored metadata and therefore works for every existing wallet:
+	// decode the phrase, derive its seed, and compare with this wallet's master seed.
+	// That answers the only two questions that matter — does this phrase still open
+	// this wallet, and will it restore anywhere else.
+	checkRecoveryPhrase() {
+		let self = this;
+		swal({
+			title: 'Check your recovery phrase',
+			text: 'Paste the 25 words you wrote down.',
+			input: 'text',
+			showCancelButton: true,
+			confirmButtonText: 'Check',
+		}).then((result: any) => {
+			if (!result.value) return;
+
+			let phrase: string = ('' + result.value).trim();
+			let lang = Mnemonic.detectLang(phrase);
+			let decoded: string | null = null;
+			if (lang !== null) {
+				try { decoded = Mnemonic.mn_decode(phrase, lang); } catch (e) { decoded = null; }
+			}
+
+			if (lang === null || decoded === null) {
+				swal({
+					type: 'error',
+					title: 'Not a recognized recovery phrase',
+					html: 'These words do not form a valid recovery phrase in any word list this ' +
+						'wallet knows. Check for typos and word order.<br><br>If you cannot recover ' +
+						'it, use <b>Show recovery seed</b> above to save a fresh backup now.',
+				});
+				return;
+			}
+
+			if (decoded.toLowerCase() !== (wallet.pqMasterSeed || '').toLowerCase()) {
+				swal({
+					type: 'error',
+					title: 'This phrase does not open this wallet',
+					html: 'The phrase is valid, but it belongs to a different wallet — restoring ' +
+						'from it would not give you these funds.<br><br>Save a correct backup now ' +
+						'with <b>Show recovery phrase</b>, and keep it somewhere safe.',
+				});
+				return;
+			}
+
+			if (!MnemonicLang.isNativeCompatible(lang)) {
+				swal({
+					type: 'warning',
+					title: 'Phrase works here, but nowhere else',
+					html: 'This phrase does open this wallet, and your funds are safe.<br><br>' +
+						'It uses the <b>' + lang + '</b> word list, which the Discrete daemon and ' +
+						'desktop wallets do not share, so it will not restore outside this web ' +
+						'wallet.<br><br>Use <b>Show recovery phrase</b>, pick <b>English</b>, and ' +
+						'keep that phrase instead. Both open the same wallet.',
+				});
+				return;
+			}
+
+			swal({
+				type: 'success',
+				title: 'Recovery phrase is good',
+				html: 'This phrase opens this wallet and uses the <b>' + lang + '</b> word list, ' +
+					'which restores in the Discrete daemon and desktop wallets too.',
+			});
+			// Remember the answer so the prompt stops nagging a holder who is fine.
+			if (wallet.mnemonicLang === null) {
+				wallet.mnemonicLang = lang;
+				self.phraseUnverified = false;
+			}
+		});
 	}
 
 	destruct(): Promise<void> {
@@ -114,7 +195,10 @@ class ExportView extends DestructableView {
 						'french': 'French',
 						'german': 'German',
 						'italian': 'Italian',
+						'japanese': 'Japanese',
+						'portuguese': 'Portuguese',
 						'russian': 'Russian',
+						'spanish': 'Spanish',
 					}
 				}).then((mnemonicLangResult: {value?:string}) => {
 					if(mnemonicLangResult.value) {

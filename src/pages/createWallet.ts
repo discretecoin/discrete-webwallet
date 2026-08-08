@@ -88,8 +88,10 @@ class CreateViewWallet extends DestructableView{
 					}
 				}
 				let phrase = Mnemonic.mn_encode(newWallet.pqMasterSeed as string, langToExport);
-				if(phrase !== null)
+				if(phrase !== null) {
 					self.mnemonicPhrase = phrase;
+					newWallet.mnemonicLang = langToExport;
+				}
 			});
 
 			// Height zero is always safe for a fresh wallet. A reachable node may
