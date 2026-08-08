@@ -33,7 +33,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLab/DependencyInjector", "../model/Wallet", "../lib/numbersLab/DestructableView", "../model/Constants", "../model/WalletRepository", "../model/Mnemonic"], function (require, exports, VueAnnotate_1, DependencyInjector_1, Wallet_1, DestructableView_1, Constants_1, WalletRepository_1, Mnemonic_1) {
+define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLab/DependencyInjector", "../model/Wallet", "../lib/numbersLab/DestructableView", "../model/Constants", "../model/WalletRepository", "../model/Mnemonic", "../model/MnemonicLang"], function (require, exports, VueAnnotate_1, DependencyInjector_1, Wallet_1, DestructableView_1, Constants_1, WalletRepository_1, Mnemonic_1, MnemonicLang_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var wallet = (0, DependencyInjector_1.DependencyInjectorInstance)().getInstance(Wallet_1.Wallet.name, 'default', false);
@@ -45,8 +45,86 @@ define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLa
             var self = _this;
             _this.publicAddress = wallet.getPublicAddress();
             _this.nativePlatform = window.native;
+            // A wallet created before phrases were checked carries no mnemonicLang, so we
+            // cannot know which word list its backup used — prompt the holder to verify.
+            // A wallet that records a retired list is a definite problem, not a maybe.
+            _this.phraseUnverified = wallet.pqMasterSeed !== null
+                && (wallet.mnemonicLang === null || !MnemonicLang_1.MnemonicLang.isNativeCompatible(wallet.mnemonicLang));
             return _this;
         }
+        // Verify a written-down phrase against the open wallet, locally.
+        //
+        // This needs no stored metadata and therefore works for every existing wallet:
+        // decode the phrase, derive its seed, and compare with this wallet's master seed.
+        // That answers the only two questions that matter — does this phrase still open
+        // this wallet, and will it restore anywhere else.
+        ExportView.prototype.checkRecoveryPhrase = function () {
+            var self = this;
+            swal({
+                title: 'Check your recovery phrase',
+                text: 'Paste the 25 words you wrote down.',
+                input: 'text',
+                showCancelButton: true,
+                confirmButtonText: 'Check',
+            }).then(function (result) {
+                if (!result.value)
+                    return;
+                var phrase = ('' + result.value).trim();
+                var lang = Mnemonic_1.Mnemonic.detectLang(phrase);
+                var decoded = null;
+                if (lang !== null) {
+                    try {
+                        decoded = Mnemonic_1.Mnemonic.mn_decode(phrase, lang);
+                    }
+                    catch (e) {
+                        decoded = null;
+                    }
+                }
+                if (lang === null || decoded === null) {
+                    swal({
+                        type: 'error',
+                        title: 'Not a recognized recovery phrase',
+                        html: 'These words do not form a valid recovery phrase in any word list this ' +
+                            'wallet knows. Check for typos and word order.<br><br>If you cannot recover ' +
+                            'it, use <b>Show recovery seed</b> above to save a fresh backup now.',
+                    });
+                    return;
+                }
+                if (decoded.toLowerCase() !== (wallet.pqMasterSeed || '').toLowerCase()) {
+                    swal({
+                        type: 'error',
+                        title: 'This phrase does not open this wallet',
+                        html: 'The phrase is valid, but it belongs to a different wallet — restoring ' +
+                            'from it would not give you these funds.<br><br>Save a correct backup now ' +
+                            'with <b>Show recovery phrase</b>, and keep it somewhere safe.',
+                    });
+                    return;
+                }
+                if (!MnemonicLang_1.MnemonicLang.isNativeCompatible(lang)) {
+                    swal({
+                        type: 'warning',
+                        title: 'Phrase works here, but nowhere else',
+                        html: 'This phrase does open this wallet, and your funds are safe.<br><br>' +
+                            'It uses the <b>' + lang + '</b> word list, which the Discrete daemon and ' +
+                            'desktop wallets do not share, so it will not restore outside this web ' +
+                            'wallet.<br><br>Use <b>Show recovery phrase</b>, pick <b>English</b>, and ' +
+                            'keep that phrase instead. Both open the same wallet.',
+                    });
+                    return;
+                }
+                swal({
+                    type: 'success',
+                    title: 'Recovery phrase is good',
+                    html: 'This phrase opens this wallet and uses the <b>' + lang + '</b> word list, ' +
+                        'which restores in the Discrete daemon and desktop wallets too.',
+                });
+                // Remember the answer so the prompt stops nagging a holder who is fine.
+                if (wallet.mnemonicLang === null) {
+                    wallet.mnemonicLang = lang;
+                    self.phraseUnverified = false;
+                }
+            });
+        };
         ExportView.prototype.destruct = function () {
             return _super.prototype.destruct.call(this);
         };
@@ -111,16 +189,18 @@ define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLa
                         input: 'select',
                         showCancelButton: true,
                         confirmButtonText: i18n.t('exportPage.mnemonicLangSelectionModal.confirmText'),
+                        // Only word lists verified byte-identical to core's, including prefix
+                        // length — see MnemonicLang.NATIVE_COMPATIBLE for the diff results
+                        // and why Electrum/Esperanto/Lojban/Spanish/Portuguese/Japanese are
+                        // not here. German was compatible all along but was never offered.
                         inputOptions: {
                             'english': 'English',
                             'chinese': 'Chinese (simplified)',
                             'dutch': 'Dutch',
-                            'electrum': 'Electrum',
-                            'esperanto': 'Esperanto',
                             'french': 'French',
+                            'german': 'German',
                             'italian': 'Italian',
                             'japanese': 'Japanese',
-                            'lojban': 'Lojban',
                             'portuguese': 'Portuguese',
                             'russian': 'Russian',
                             'spanish': 'Spanish',
@@ -162,6 +242,9 @@ define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLa
         __decorate([
             (0, VueAnnotate_1.VueVar)(false)
         ], ExportView.prototype, "nativePlatform", void 0);
+        __decorate([
+            (0, VueAnnotate_1.VueVar)(false)
+        ], ExportView.prototype, "phraseUnverified", void 0);
         return ExportView;
     }(DestructableView_1.DestructableView));
     if (wallet !== null && blockchainExplorer !== null)

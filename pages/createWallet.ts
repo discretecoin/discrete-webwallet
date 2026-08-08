@@ -75,16 +75,23 @@ class CreateViewWallet extends DestructableView{
 			self.newWallet = newWallet;
 
 			Translations.getLang().then(function(userLang : string){
+				// getBrowserLang() returns the raw navigator locale, not one of the
+				// shipped translations, so this can be any ISO code. Only word lists
+				// the native wallets can also read are eligible here: 'el' (Greek)
+				// used to match the 'electrum' list and mint the one backup a user is
+				// ever shown as 24 unchecksummed words that restore nowhere.
 				let langToExport = 'english';
-				for(let lang of MnemonicLang.getLangs()){
+				for(let lang of MnemonicLang.getMintableLangs()){
 					if(lang.shortLang === userLang){
 						langToExport = lang.name;
 						break;
 					}
 				}
 				let phrase = Mnemonic.mn_encode(newWallet.pqMasterSeed as string, langToExport);
-				if(phrase !== null)
+				if(phrase !== null) {
 					self.mnemonicPhrase = phrase;
+					newWallet.mnemonicLang = langToExport;
+				}
 			});
 
 			// Height zero is always safe for a fresh wallet. A reachable node may

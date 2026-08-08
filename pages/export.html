@@ -26,12 +26,31 @@
 		<div style="color:var(--color-text-muted);font-size:0.8125rem;line-height:1.6;" v-html="$t('exportPage.warningBlock.content')"></div>
 	</div>
 
+	<!-- Recovery-phrase health. Shown when this wallet predates portable phrases, or
+	     was created in a word list that has since been retired. -->
+	<div class="card" v-if="phraseUnverified" style="border-color:#c9a227;">
+		<div class="card-title">Check your recovery phrase</div>
+		<p style="margin-top:0;">
+			This wallet was created before recovery phrases were checked for portability.
+			If yours was written in a word list the Discrete daemon and desktop wallets
+			do not share, it will not restore anywhere else — even though this wallet
+			keeps working normally here.
+		</p>
+		<p>
+			Paste the phrase you wrote down and this page will tell you whether it still
+			opens this wallet and whether it restores elsewhere. The check runs entirely
+			in your browser; nothing is sent anywhere.
+		</p>
+		<button class="btn primary" style="width:100%;" @click="checkRecoveryPhrase()">Check my recovery phrase</button>
+	</div>
+
 	<!-- Export Keys -->
 	<div class="card">
 		<div class="card-title">{{ $t("exportPage.exportBlock.title") }}</div>
 		<div style="display:flex;flex-direction:column;gap:0.5rem;">
 			<button class="btn" style="width:100%;" @click="getPrivateKeys()">{{ $t("exportPage.exportBlock.privateKeysButton") }}</button>
 			<button class="btn" style="width:100%;" @click="getMnemonicPhrase()">{{ $t("exportPage.exportBlock.mnemonicKeysButton") }}</button>
+			<button class="btn" style="width:100%;" @click="checkRecoveryPhrase()">Check a recovery phrase</button>
 			<button class="btn" style="width:100%;" v-if="!nativePlatform" @click="fileExport()">{{ $t("exportPage.exportBlock.fileButton") }}</button>
 		</div>
 	</div>

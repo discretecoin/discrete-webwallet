@@ -81,6 +81,8 @@ define(["require", "exports", "./Transaction", "./KeysRepository", "../lib/numbe
             _this.pqAddress = null;
             _this.pqState = null;
             _this.pqMempoolState = null;
+            // See RawWallet.mnemonicLang. null means "unknown", not "none".
+            _this.mnemonicLang = null;
             _this._options = new WalletOptions();
             _this.signalChanged = function () {
                 _this.modifiedTS = new Date();
@@ -139,6 +141,8 @@ define(["require", "exports", "./Transaction", "./KeysRepository", "../lib/numbe
                 data.pqAddress = this.pqAddress;
             if (this.pqState !== null)
                 data.pqState = this.pqState.toJSON();
+            if (this.mnemonicLang !== null)
+                data.mnemonicLang = this.mnemonicLang;
             if (this.creationHeight !== 0)
                 data.creationHeight = this.creationHeight;
             return data;
@@ -195,6 +199,8 @@ define(["require", "exports", "./Transaction", "./KeysRepository", "../lib/numbe
                 wallet.pqMasterSeed = raw.pqMasterSeed;
             if (typeof raw.pqAddress === 'string')
                 wallet.pqAddress = raw.pqAddress;
+            if (typeof raw.mnemonicLang === 'string')
+                wallet.mnemonicLang = raw.mnemonicLang;
             if (typeof raw.pqState !== 'undefined')
                 wallet.pqState = DiscreteRuntime.DiscreteWalletState.fromJSON(raw.pqState);
             if (wallet.pqMasterSeed !== null && wallet.pqState === null)

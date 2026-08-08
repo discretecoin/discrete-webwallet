@@ -23,6 +23,7 @@ import {Wallet} from "../model/Wallet";
 import {KeysRepository} from "../model/KeysRepository";
 import {BlockchainExplorerProvider} from "../providers/BlockchainExplorerProvider";
 import {Mnemonic} from "../model/Mnemonic";
+import {MnemonicLang} from "../model/MnemonicLang";
 import {BlockchainExplorer} from "../model/blockchain/BlockchainExplorer";
 import {Cn} from "../model/Cn";
 
@@ -45,20 +46,33 @@ class ImportView extends DestructableView {
 	constructor(container: string) {
 		super(container);
 
+		// Import stays permissive on purpose: every word list this wallet has ever
+		// minted a phrase in must remain importable, including the six no longer
+		// offered for export — otherwise this change would lock those holders out.
+		// Each entry must correspond to a real list in MnemonicLang: 'ukrainian' was
+		// offered here without one, so picking it could only ever fail, and 'german'
+		// had a list but was never offered.
 		this.languages.push({key: 'auto', name: 'Detect automatically'});
 		this.languages.push({key: 'english', name: 'English'});
 		this.languages.push({key: 'chinese', name: 'Chinese (simplified)'});
 		this.languages.push({key: 'dutch', name: 'Dutch'});
-		this.languages.push({key: 'electrum', name: 'Electrum'});
-		this.languages.push({key: 'esperanto', name: 'Esperanto'});
 		this.languages.push({key: 'french', name: 'French'});
+		this.languages.push({key: 'german', name: 'German'});
 		this.languages.push({key: 'italian', name: 'Italian'});
 		this.languages.push({key: 'japanese', name: 'Japanese'});
-		this.languages.push({key: 'lojban', name: 'Lojban'});
 		this.languages.push({key: 'portuguese', name: 'Portuguese'});
 		this.languages.push({key: 'russian', name: 'Russian'});
 		this.languages.push({key: 'spanish', name: 'Spanish'});
-		this.languages.push({key: 'ukrainian', name: 'Ukrainian'});
+		// Import-only. The first three are the word lists these languages used before
+		// they were taken over from core; the last three were never in core at all.
+		// 'Detect automatically' tries the current lists first, so these only matter
+		// for a phrase minted before the switch.
+		this.languages.push({key: 'spanish-legacy', name: 'Spanish (old phrase)'});
+		this.languages.push({key: 'portuguese-legacy', name: 'Portuguese (old phrase)'});
+		this.languages.push({key: 'japanese-legacy', name: 'Japanese (old phrase)'});
+		this.languages.push({key: 'electrum', name: 'Electrum (old phrase)'});
+		this.languages.push({key: 'esperanto', name: 'Esperanto (old phrase)'});
+		this.languages.push({key: 'lojban', name: 'Lojban (old phrase)'});
 		this.language = 'auto';
 	}
 
@@ -96,6 +110,7 @@ class ImportView extends DestructableView {
 				let newWallet = new Wallet();
 				let seed = new Uint8Array((mnemonic_decoded as string).match(/../g)!.map(byte => parseInt(byte, 16)));
 				newWallet.initializePq(seed, Boolean((<any>config).testnet));
+				newWallet.mnemonicLang = current_lang;
 
 				let height = self.importHeight - 10;
 				if (height < 0) height = 0;
@@ -105,6 +120,22 @@ class ImportView extends DestructableView {
 				newWallet.creationHeight = newWallet.lastHeight;
 				newWallet.pqState.height = height;
 				AppState.openWallet(newWallet, self.password);
+
+				// A phrase in a word list the native wallets do not ship still imports
+				// here — the seed is the same 32 bytes — but it is not a portable
+				// backup. Tell the holder now, while they are looking at a working
+				// wallet, rather than when they try to restore it somewhere else.
+				if (!MnemonicLang.isNativeCompatible(current_lang)) {
+					swal({
+						type: 'warning',
+						title: 'Recovery phrase is not portable',
+						html: 'This phrase uses the <b>' + current_lang + '</b> word list, which the Discrete ' +
+							'daemon and desktop wallets cannot read. Your funds are safe and this wallet works ' +
+							'normally, but the phrase will not restore anywhere else.<br><br>' +
+							'Open <b>Export</b>, save a new recovery phrase in English, and keep that one instead.',
+					});
+				}
+
 				window.location.href = '#account';
 			} else {
 				swal({
@@ -146,15 +177,22 @@ class ImportView extends DestructableView {
 	}
 
 	checkMnemonicValidity() {
-		let splitted = this.mnemonicPhrase.trim().split(' ');
+		// Any run of whitespace separates words, so a phrase pasted out of a key
+		// backup or a chat message validates instead of being counted as one token.
+		let splitted = this.mnemonicPhrase.trim().split(/\s+/);
 		if (splitted.length != 25) {
 			this.validMnemonicPhrase = false;
+		} else if (this.language === 'auto') {
+			this.validMnemonicPhrase = Mnemonic.detectLang(this.mnemonicPhrase) !== null;
 		} else {
-			let detected = Mnemonic.detectLang(this.mnemonicPhrase.trim());
-			if (this.language === 'auto')
-				this.validMnemonicPhrase = detected !== null;
-			else
-				this.validMnemonicPhrase = detected === this.language;
+			// With a language chosen explicitly, ask whether the phrase decodes under
+			// THAT list rather than whether detection happens to name it. The two
+			// differ for a phrase in a retired list whose replacement shares its name.
+			try {
+				this.validMnemonicPhrase = Mnemonic.mn_decode(this.mnemonicPhrase, this.language) !== null;
+			} catch (e) {
+				this.validMnemonicPhrase = false;
+			}
 		}
 	}
 

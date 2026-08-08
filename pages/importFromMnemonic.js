@@ -34,7 +34,7 @@ var __decorate = (this && this.__decorate) || function (decorators, target, key,
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numbersLab/VueAnnotate", "../model/AppState", "../model/Password", "../model/Wallet", "../providers/BlockchainExplorerProvider", "../model/Mnemonic"], function (require, exports, DestructableView_1, VueAnnotate_1, AppState_1, Password_1, Wallet_1, BlockchainExplorerProvider_1, Mnemonic_1) {
+define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numbersLab/VueAnnotate", "../model/AppState", "../model/Password", "../model/Wallet", "../providers/BlockchainExplorerProvider", "../model/Mnemonic", "../model/MnemonicLang"], function (require, exports, DestructableView_1, VueAnnotate_1, AppState_1, Password_1, Wallet_1, BlockchainExplorerProvider_1, Mnemonic_1, MnemonicLang_1) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     AppState_1.AppState.enableLeftMenu();
@@ -43,20 +43,33 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
         __extends(ImportView, _super);
         function ImportView(container) {
             var _this = _super.call(this, container) || this;
+            // Import stays permissive on purpose: every word list this wallet has ever
+            // minted a phrase in must remain importable, including the six no longer
+            // offered for export — otherwise this change would lock those holders out.
+            // Each entry must correspond to a real list in MnemonicLang: 'ukrainian' was
+            // offered here without one, so picking it could only ever fail, and 'german'
+            // had a list but was never offered.
             _this.languages.push({ key: 'auto', name: 'Detect automatically' });
             _this.languages.push({ key: 'english', name: 'English' });
             _this.languages.push({ key: 'chinese', name: 'Chinese (simplified)' });
             _this.languages.push({ key: 'dutch', name: 'Dutch' });
-            _this.languages.push({ key: 'electrum', name: 'Electrum' });
-            _this.languages.push({ key: 'esperanto', name: 'Esperanto' });
             _this.languages.push({ key: 'french', name: 'French' });
+            _this.languages.push({ key: 'german', name: 'German' });
             _this.languages.push({ key: 'italian', name: 'Italian' });
             _this.languages.push({ key: 'japanese', name: 'Japanese' });
-            _this.languages.push({ key: 'lojban', name: 'Lojban' });
             _this.languages.push({ key: 'portuguese', name: 'Portuguese' });
             _this.languages.push({ key: 'russian', name: 'Russian' });
             _this.languages.push({ key: 'spanish', name: 'Spanish' });
-            _this.languages.push({ key: 'ukrainian', name: 'Ukrainian' });
+            // Import-only. The first three are the word lists these languages used before
+            // they were taken over from core; the last three were never in core at all.
+            // 'Detect automatically' tries the current lists first, so these only matter
+            // for a phrase minted before the switch.
+            _this.languages.push({ key: 'spanish-legacy', name: 'Spanish (old phrase)' });
+            _this.languages.push({ key: 'portuguese-legacy', name: 'Portuguese (old phrase)' });
+            _this.languages.push({ key: 'japanese-legacy', name: 'Japanese (old phrase)' });
+            _this.languages.push({ key: 'electrum', name: 'Electrum (old phrase)' });
+            _this.languages.push({ key: 'esperanto', name: 'Esperanto (old phrase)' });
+            _this.languages.push({ key: 'lojban', name: 'Lojban (old phrase)' });
             _this.language = 'auto';
             return _this;
         }
@@ -88,6 +101,7 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
                     var newWallet_1 = new Wallet_1.Wallet();
                     var seed = new Uint8Array(mnemonic_decoded.match(/../g).map(function (byte) { return parseInt(byte, 16); }));
                     newWallet_1.initializePq(seed, Boolean(config.testnet));
+                    newWallet_1.mnemonicLang = current_lang;
                     var height = self.importHeight - 10;
                     if (height < 0)
                         height = 0;
@@ -97,6 +111,20 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
                     newWallet_1.creationHeight = newWallet_1.lastHeight;
                     newWallet_1.pqState.height = height;
                     AppState_1.AppState.openWallet(newWallet_1, self.password);
+                    // A phrase in a word list the native wallets do not ship still imports
+                    // here — the seed is the same 32 bytes — but it is not a portable
+                    // backup. Tell the holder now, while they are looking at a working
+                    // wallet, rather than when they try to restore it somewhere else.
+                    if (!MnemonicLang_1.MnemonicLang.isNativeCompatible(current_lang)) {
+                        swal({
+                            type: 'warning',
+                            title: 'Recovery phrase is not portable',
+                            html: 'This phrase uses the <b>' + current_lang + '</b> word list, which the Discrete ' +
+                                'daemon and desktop wallets cannot read. Your funds are safe and this wallet works ' +
+                                'normally, but the phrase will not restore anywhere else.<br><br>' +
+                                'Open <b>Export</b>, save a new recovery phrase in English, and keep that one instead.',
+                        });
+                    }
                     window.location.href = '#account';
                 }
                 else {
@@ -131,16 +159,25 @@ define(["require", "exports", "../lib/numbersLab/DestructableView", "../lib/numb
             this.checkMnemonicValidity();
         };
         ImportView.prototype.checkMnemonicValidity = function () {
-            var splitted = this.mnemonicPhrase.trim().split(' ');
+            // Any run of whitespace separates words, so a phrase pasted out of a key
+            // backup or a chat message validates instead of being counted as one token.
+            var splitted = this.mnemonicPhrase.trim().split(/\s+/);
             if (splitted.length != 25) {
                 this.validMnemonicPhrase = false;
             }
+            else if (this.language === 'auto') {
+                this.validMnemonicPhrase = Mnemonic_1.Mnemonic.detectLang(this.mnemonicPhrase) !== null;
+            }
             else {
-                var detected = Mnemonic_1.Mnemonic.detectLang(this.mnemonicPhrase.trim());
-                if (this.language === 'auto')
-                    this.validMnemonicPhrase = detected !== null;
-                else
-                    this.validMnemonicPhrase = detected === this.language;
+                // With a language chosen explicitly, ask whether the phrase decodes under
+                // THAT list rather than whether detection happens to name it. The two
+                // differ for a phrase in a retired list whose replacement shares its name.
+                try {
+                    this.validMnemonicPhrase = Mnemonic_1.Mnemonic.mn_decode(this.mnemonicPhrase, this.language) !== null;
+                }
+                catch (e) {
+                    this.validMnemonicPhrase = false;
+                }
             }
         };
         ImportView.prototype.forceInsecurePasswordCheck = function () {

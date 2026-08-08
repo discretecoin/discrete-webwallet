@@ -55,8 +55,13 @@ define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLa
                 var syncHeightLocked = false;
                 self.newWallet = newWallet;
                 Translations_1.Translations.getLang().then(function (userLang) {
+                    // getBrowserLang() returns the raw navigator locale, not one of the
+                    // shipped translations, so this can be any ISO code. Only word lists
+                    // the native wallets can also read are eligible here: 'el' (Greek)
+                    // used to match the 'electrum' list and mint the one backup a user is
+                    // ever shown as 24 unchecksummed words that restore nowhere.
                     var langToExport = 'english';
-                    for (var _i = 0, _a = MnemonicLang_1.MnemonicLang.getLangs(); _i < _a.length; _i++) {
+                    for (var _i = 0, _a = MnemonicLang_1.MnemonicLang.getMintableLangs(); _i < _a.length; _i++) {
                         var lang = _a[_i];
                         if (lang.shortLang === userLang) {
                             langToExport = lang.name;
@@ -64,8 +69,10 @@ define(["require", "exports", "../lib/numbersLab/VueAnnotate", "../lib/numbersLa
                         }
                     }
                     var phrase = Mnemonic_1.Mnemonic.mn_encode(newWallet.pqMasterSeed, langToExport);
-                    if (phrase !== null)
+                    if (phrase !== null) {
                         self.mnemonicPhrase = phrase;
+                        newWallet.mnemonicLang = langToExport;
+                    }
                 });
                 // Height zero is always safe for a fresh wallet. A reachable node may
                 // optimize the first scan, but local key and recovery-word generation

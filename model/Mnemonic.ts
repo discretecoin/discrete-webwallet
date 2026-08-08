@@ -113,7 +113,11 @@ export class Mnemonic{
 
 		let out = '';
 		let n = wordset.words.length;
-		let wlist = str.split(' ');
+		// Split on any run of whitespace. Splitting on a single space turned a phrase
+		// pasted with newlines, tabs or double spaces into empty tokens and words with
+		// punctuation glued on, which then failed as "invalid word in mnemonic". The
+		// native wallets accept the same shapes.
+		let wlist = str.trim().split(/\s+/);
 		let checksum_word = '';
 		if (wlist.length < 12) throw "You've entered too few words, please try again";
 		if ((wordset.prefixLen === 0 && (wlist.length % 3 !== 0)) ||
@@ -126,17 +130,26 @@ export class Mnemonic{
 				checksum_word = word;
 		}
 		// Decode mnemonic
+		// Resolve each word to its index by exact match first, falling back to the
+		// truncated prefix. Prefix matching exists to tolerate a phrase written with
+		// shortened words, but indexOf returns the FIRST match, so on a list whose
+		// prefixes are not unique it can resolve a fully-spelled word to the wrong
+		// index and silently produce a different seed. That is not hypothetical: the
+		// retired 'portuguese-legacy' list has 1626 distinct words but only 1597
+		// distinct 3-character prefixes. Preferring the exact word decodes those
+		// correctly, and is identical to the old behaviour on every list whose
+		// prefixes are unique.
+		let indexOfWord = function (word : string) : number {
+			let exact = wordset.words.indexOf(word);
+			if (exact !== -1) return exact;
+			if (wordset.prefixLen === 0) return -1;
+			return wordset.trunc_words.indexOf(word.slice(0, wordset.prefixLen));
+		};
+
 		for (let i = 0; i < wlist.length; i += 3) {
-			let w1, w2, w3;
-			if (wordset.prefixLen === 0) {
-				w1 = wordset.words.indexOf(wlist[i]);
-				w2 = wordset.words.indexOf(wlist[i + 1]);
-				w3 = wordset.words.indexOf(wlist[i + 2]);
-			} else {
-				w1 = wordset.trunc_words.indexOf(wlist[i].slice(0, wordset.prefixLen));
-				w2 = wordset.trunc_words.indexOf(wlist[i + 1].slice(0, wordset.prefixLen));
-				w3 = wordset.trunc_words.indexOf(wlist[i + 2].slice(0, wordset.prefixLen));
-			}
+			let w1 = indexOfWord(wlist[i]);
+			let w2 = indexOfWord(wlist[i + 1]);
+			let w3 = indexOfWord(wlist[i + 2]);
 			if (w1 === -1 || w2 === -1 || w3 === -1) {
 				throw "invalid word in mnemonic";
 			}
@@ -197,11 +210,23 @@ export class Mnemonic{
 		return out;
 	}
 
+	// Identify which word list a phrase belongs to.
+	//
+	// "It decoded without throwing" is not sufficient evidence. Word lists overlap
+	// once truncated to their prefix length, so a phrase from a 4-prefix list can
+	// satisfy English's 3-character prefixes and pass the checksum by chance —
+	// observed with a Lojban phrase decoding as English and yielding a completely
+	// different seed, silently. Re-encoding the decoded seed and requiring it to
+	// reproduce the input word-for-word makes the answer exact: only the list the
+	// phrase was actually minted in can round-trip back to it.
 	static detectLang(mnemonicPhrase : string){
+		let normalized = mnemonicPhrase.trim().split(/\s+/).join(' ');
 		for(let lang of MnemonicLang.getLangs()){
 			try {
 				let mnemonic_decoded = Mnemonic.mn_decode(mnemonicPhrase, lang.name);
-				if (mnemonic_decoded !== null) {
+				if (mnemonic_decoded === null) continue;
+				let reencoded = Mnemonic.mn_encode(mnemonic_decoded, lang.name);
+				if (reencoded !== null && reencoded === normalized) {
 					return lang.name;
 				}
 			}catch(e){}
