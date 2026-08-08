@@ -2472,6 +2472,45 @@ export class MnemonicLang{
 		return null;
 	}
 
+	// Word lists whose phrases also restore in the Discrete daemon and CLI wallets.
+	// Membership is not a guess: each entry below was diffed word-for-word against
+	// the matching list in core's src/Mnemonics/ and must agree on BOTH the 1626
+	// words and the prefix length. The prefix matters as much as the words, because
+	// the checksum word is chosen from prefix-truncated forms — a prefix mismatch
+	// alone produces a phrase the other side rejects.
+	//
+	// Everything in getLangs() stays loaded so an already-minted phrase can still be
+	// imported here, but a NEW phrase must never be minted outside this set.
+	//
+	// Deliberately excluded, with the reason each fails:
+	//   - 'electrum'   prefixLen 0, so it emits 24 words with NO checksum word, and
+	//                  core has no such list. Worst case: it was reachable from a
+	//                  Greek browser locale ('el') at wallet creation.
+	//   - 'esperanto'  well-formed 25 words, but core ships no such list.
+	//   - 'lojban'     likewise.
+	//   - 'spanish'    34 of the 1626 words differ from core's list.
+	//   - 'portuguese' 3 words differ, AND prefixLen is 3 here vs 4 in core. At 3 the
+	//                  list has only 1597 unique prefixes, so 29 words collide and
+	//                  mn_decode resolves them to the first match — a Portuguese
+	//                  phrase can fail to round-trip even inside this wallet.
+	//   - 'japanese'   the word list is identical to core's, but prefixLen is 4 here
+	//                  vs 3 in core, so the checksum words disagree.
+	//
+	// Fixing the last three means changing minted output, which invalidates phrases
+	// already issued in them — treat as a migration, not a patch.
+	static readonly NATIVE_COMPATIBLE = [
+		'english', 'chinese', 'dutch', 'french', 'german', 'italian', 'russian',
+	];
+
+	static isNativeCompatible(name : string) : boolean{
+		return MnemonicLang.NATIVE_COMPATIBLE.indexOf(name) !== -1;
+	}
+
+	// Word lists offered when creating or exporting a recovery phrase.
+	static getMintableLangs(): Array<MnemonicLang> {
+		return MnemonicLang.getLangs().filter(lang => MnemonicLang.isNativeCompatible(lang.name));
+	}
+
 }
 
 

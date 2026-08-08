@@ -103,19 +103,18 @@ class ExportView extends DestructableView {
 					input: 'select',
 					showCancelButton: true,
 					confirmButtonText: i18n.t('exportPage.mnemonicLangSelectionModal.confirmText'),
+					// Only word lists verified byte-identical to core's, including prefix
+					// length — see MnemonicLang.NATIVE_COMPATIBLE for the diff results
+					// and why Electrum/Esperanto/Lojban/Spanish/Portuguese/Japanese are
+					// not here. German was compatible all along but was never offered.
 					inputOptions: {
 						'english': 'English',
 						'chinese': 'Chinese (simplified)',
 						'dutch': 'Dutch',
-						'electrum': 'Electrum',
-						'esperanto': 'Esperanto',
 						'french': 'French',
+						'german': 'German',
 						'italian': 'Italian',
-						'japanese': 'Japanese',
-						'lojban': 'Lojban',
-						'portuguese': 'Portuguese',
 						'russian': 'Russian',
-						'spanish': 'Spanish',
 					}
 				}).then((mnemonicLangResult: {value?:string}) => {
 					if(mnemonicLangResult.value) {
