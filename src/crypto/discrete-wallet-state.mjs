@@ -12,13 +12,32 @@ const amount = value => {
   return BigInt(value);
 };
 
+// Ordinary inputs, in order. '10' carries its spend key. '13' is a key reference
+// (grouped authorization, an unscheduled consensus upgrade): it carries no key
+// and names an earlier '10' input whose key authorizes it. The key matters twice
+// here: for the nullifier that detects our own spends, and because every output
+// of the transaction was derived from the inputs hash over ALL its outpoints, so
+// dropping a reference would make incoming payments invisible.
 function pqInputs(transaction) {
-  return (transaction.vin || []).filter(input => input.type === '10').map(input => ({
-    prevTxid: hexToBytes(input.value.prev_txid),
-    prevOutIndex: Number(input.value.prev_out_index),
-    authPublicKey: hexToBytes(input.value.auth_pub),
-    rho: hexToBytes(input.value.rho_reveal),
-  }));
+  const vin = transaction.vin || [];
+  const inputs = [];
+  vin.forEach((input, index) => {
+    if (input.type !== '10' && input.type !== '13') return;
+    let authPublicKey = input.value.auth_pub;
+    if (input.type === '13') {
+      const keyRef = Number(input.value.key_ref);
+      const target = Number.isSafeInteger(keyRef) && keyRef >= 0 && keyRef < index ? vin[keyRef] : undefined;
+      if (!target || target.type !== '10') throw new Error('malformed key-reference input');
+      authPublicKey = target.value.auth_pub;
+    }
+    inputs.push({
+      prevTxid: hexToBytes(input.value.prev_txid),
+      prevOutIndex: Number(input.value.prev_out_index),
+      authPublicKey: hexToBytes(authPublicKey),
+      rho: hexToBytes(input.value.rho_reveal),
+    });
+  });
+  return inputs;
 }
 
 export class DiscreteWalletState {

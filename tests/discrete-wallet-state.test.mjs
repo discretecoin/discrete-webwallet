@@ -146,3 +146,68 @@ assert.equal(resetState.height, 43);
     assert.equal(outsider.balance(), 0n, `T=${depositIndex}: leaked to a stranger`);
   }
 }
+
+// Grouped input authorization (unscheduled consensus upgrade): an input may be a
+// key reference, wire type '13', naming an earlier '10' input that carries the
+// same spend key. The wallet must take the key from that input, both to see its
+// own spends and to rebuild the inputs hash every output was derived from.
+{
+  const funder = deriveWalletKeys(pattern(32, 1, 9));
+  const owner = deriveWalletKeys(pattern(32, 1, 77));
+  const ownerKeys = { viewSecretKey: owner.viewSecretKey, spendPublicKey: owner.spendPublicKey };
+  const payee = deriveWalletKeys(pattern(32, 1, 150));
+  const payeeKeys = { viewSecretKey: payee.viewSecretKey, spendPublicKey: payee.spendPublicKey };
+  const toWire = (built, hash, grouped) => ({ coinbase: false, hash, transaction: {
+    version: 1, tx_type: 1,
+    vin: built.transaction.inputs.map((input, index) => (grouped && index > 0
+      ? { type: '13', value: { prev_txid: hex(input.transactionHash), prev_out_index: input.outputIndex,
+          key_ref: 0, rho_reveal: hex(input.rho) } }
+      : { type: '10', value: { prev_txid: hex(input.transactionHash), prev_out_index: input.outputIndex,
+          auth_pub: hex(input.spendPublicKey), rho_reveal: hex(input.rho) } })),
+    vout: built.transaction.outputs.map(output => ({ amount: output.amount.toString(), unlock_height: 0,
+      target: { type: '10', data: { kem_ct: hex(output.kemCiphertext),
+        enc_payload: hex(output.encryptedPayload), spend_commit: hex(output.spendCommit) } } })),
+  } });
+
+  // Fund two outputs of one key.
+  const fundingHash = 'ee'.repeat(32);
+  const funding = buildSignedTransaction({
+    inputs: [{ transactionHash: 'ab'.repeat(32), outputIndex: 0, amount: 501n, rho: pattern(32, 3, 9) }],
+    destinations: [
+      { viewPublicKey: owner.viewPublicKey, spendPublicKey: owner.spendPublicKey, amount: 300n },
+      { viewPublicKey: owner.viewPublicKey, spendPublicKey: owner.spendPublicKey, amount: 200n }],
+    fee: 1n, spendPublicKey: funder.spendPublicKey, spendSecretKey: funder.spendSecretKey,
+  });
+  const wallet = new DiscreteWalletState(10);
+  wallet.applyBlock({ height: 10, hash: '10'.repeat(32), previous_hash: null, timestamp: 1,
+    transactions: [toWire(funding, fundingHash, false)] }, ownerKeys);
+  assert.equal(wallet.balance(), 500n);
+
+  // Spend both: the second input only references the first one's key.
+  const owned = wallet.outputs;
+  const spendBoth = buildSignedTransaction({
+    inputs: owned.map(output => ({ transactionHash: fundingHash, outputIndex: output.outputIndex,
+      amount: output.amount, rho: output.rho })),
+    destinations: [{ viewPublicKey: payee.viewPublicKey, spendPublicKey: payee.spendPublicKey, amount: 499n }],
+    fee: 1n, spendPublicKey: owner.spendPublicKey, spendSecretKey: owner.spendSecretKey,
+  });
+  const groupedWire = toWire(spendBoth, 'ef'.repeat(32), true);
+  assert.equal(groupedWire.transaction.vin[1].type, '13');
+  wallet.applyBlock({ height: 11, hash: '11'.repeat(32), previous_hash: '10'.repeat(32), timestamp: 2,
+    transactions: [groupedWire] }, ownerKeys);
+  assert.equal(wallet.balance(), 0n, 'a key-reference input must spend its output');
+
+  // The payee finds the payment only if the referenced outpoint is in the inputs hash.
+  const received = new DiscreteWalletState(11);
+  received.applyBlock({ height: 11, hash: '11'.repeat(32), previous_hash: null, timestamp: 2,
+    transactions: [groupedWire] }, payeeKeys);
+  assert.equal(received.balance(), 499n, 'a payment from a grouped transaction must be visible');
+
+  // A reference that does not name an earlier key-carrying input is malformed.
+  for (const keyRef of [1, 2]) {
+    const bad = structuredClone(groupedWire);
+    bad.transaction.vin[1].value.key_ref = keyRef;
+    assert.throws(() => new DiscreteWalletState(11).applyBlock({ height: 11, hash: '11'.repeat(32),
+      previous_hash: null, timestamp: 2, transactions: [bad] }, payeeKeys), /key-reference/);
+  }
+}
