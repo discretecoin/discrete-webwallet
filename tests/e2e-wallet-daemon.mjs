@@ -2,6 +2,8 @@ import { accountRegistrationExtra, buildSignedTransaction } from '../src/crypto/
 import { deriveWalletKeys, encodeAddress, parseAccountNumber } from '../src/crypto/discrete-wallet-keys.mjs';
 import { DiscreteWalletState } from '../src/crypto/discrete-wallet-state.mjs';
 
+// Needs a fresh --testnet daemon with at least one peer: a node with no peers never
+// counts as synchronized, so start_mining only arms the miner and no block is found.
 const base = process.env.DISCRETE_E2E_RPC || 'http://127.0.0.1:19331/';
 const hex = bytes => Buffer.from(bytes).toString('hex');
 const rpc = async (path, body) => {
@@ -18,6 +20,24 @@ const waitForHeight = async target => {
   throw new Error(`timed out mining height ${target}`);
 };
 const currentHeight = async () => fetch(new URL('getheight', base)).then(r => r.json()).then(info => info.height);
+const poolSize = async () => (await rpc('gettransactionspool', {})).transactions?.length || 0;
+// Dandelion stem relay can hold a submitted transaction away from this node's pool
+// for a while, and at testnet difficulty the next block may be mined before it
+// arrives. Wait for it to reach the pool, then mine until the pool drains.
+const mineUntilConfirmed = async minerSeed => {
+  for (let i = 0; i < 240 && await poolSize() === 0; ++i) await new Promise(resolve => setTimeout(resolve, 500));
+  if (await poolSize() === 0) throw new Error('submitted transaction never reached the pool');
+  await rpc('start_mining', { miner_spend_key: hex(minerSeed), miner_view_key: '', threads_count: 4 });
+  try {
+    for (let i = 0; i < 480; ++i) {
+      if (await poolSize() === 0) return currentHeight();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    throw new Error('timed out waiting for confirmation');
+  } finally {
+    await rpc('stop_mining', {});
+  }
+};
 
 const senderSeed = Uint8Array.from({ length: 32 }, (_, i) => i + 1);
 const recipientSeed = Uint8Array.from({ length: 32 }, (_, i) => 255 - i);
@@ -45,10 +65,7 @@ const built = buildSignedTransaction({ inputs: [input], destinations: [{
 const submitted = await rpc('sendrawtransaction', { tx_as_hex: hex(built.bytes) });
 if (submitted.status !== 'OK') throw new Error(`transaction rejected: ${JSON.stringify(submitted)}`);
 
-const confirmationTarget = (await currentHeight()) + 1;
-await rpc('start_mining', { miner_spend_key: hex(senderSeed), miner_view_key: '', threads_count: 4 });
-await waitForHeight(confirmationTarget);
-await rpc('stop_mining', {});
+await mineUntilConfirmed(senderSeed);
 const recipientSync = await rpc('get_wallet_sync_data', { start_height: 0, block_count: 100, include_miner_txs: true });
 const recipient = new DiscreteWalletState();
 for (const block of recipientSync.blocks) recipient.applyBlock(block, recipientKeys);
@@ -66,10 +83,7 @@ const registrationTx = buildSignedTransaction({ inputs: [registrationInput], des
   fee, extra: registrationExtra, spendPublicKey: recipientKeys.spendPublicKey, spendSecretKey: recipientKeys.spendSecretKey });
 const registrationSubmitted = await rpc('sendrawtransaction', { tx_as_hex: hex(registrationTx.bytes) });
 if (registrationSubmitted.status !== 'OK') throw new Error(`registration rejected: ${JSON.stringify(registrationSubmitted)}`);
-const registrationHeight = (await currentHeight()) + 1;
-await rpc('start_mining', { miner_spend_key: hex(senderSeed), miner_view_key: '', threads_count: 4 });
-await waitForHeight(registrationHeight);
-await rpc('stop_mining', {});
+await mineUntilConfirmed(senderSeed);
 
 const accountStatus = await rpc('json_rpc', { jsonrpc: '2.0', id: 1, method: 'getaccountnumber', params: {
   view_pub: hex(recipientKeys.viewPublicKey), spend_pub: hex(recipientKeys.spendPublicKey),
@@ -81,9 +95,24 @@ if (parsedAccountNumber.blockHeight !== accountStatus.result.block_height ||
     parsedAccountNumber.transactionIndex !== accountStatus.result.tx_index) {
   throw new Error(`daemon returned inconsistent account number: ${JSON.stringify(accountStatus)}`);
 }
-const resolved = await rpc('json_rpc', { jsonrpc: '2.0', id: 2, method: 'resolveaccountnumber', params: {
+// Others can resolve a number only once its registration is final, so keep
+// mining until the daemon answers for it.
+const resolveAccount = () => rpc('json_rpc', { jsonrpc: '2.0', id: 2, method: 'resolveaccountnumber', params: {
   block_height: accountStatus.result.block_height, tx_index: accountStatus.result.tx_index,
 } });
+let resolved = await resolveAccount();
+if (!resolved.result?.found) {
+  await rpc('start_mining', { miner_spend_key: hex(senderSeed), miner_view_key: '', threads_count: 4 });
+  try {
+    // CRYPTONOTE_FINALITY_DEPTH (10) blocks, while testnet difficulty is rising.
+    for (let i = 0; i < 2400 && !resolved.result?.found; ++i) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      resolved = await resolveAccount();
+    }
+  } finally {
+    await rpc('stop_mining', {});
+  }
+}
 if (resolved.result?.view_pub !== hex(recipientKeys.viewPublicKey) || resolved.result?.spend_pub !== hex(recipientKeys.spendPublicKey)) {
   throw new Error(`account resolution mismatch: ${JSON.stringify(resolved)}`);
 }
