@@ -1,4 +1,4 @@
-import { accountRegistrationExtra, buildSignedTransaction } from '../src/crypto/discrete-transaction.mjs';
+import { accountRegistrationExtra, buildSignedTransaction, signingContextForHeight } from '../src/crypto/discrete-transaction.mjs';
 import { deriveWalletKeys, encodeAddress, parseAccountNumber } from '../src/crypto/discrete-wallet-keys.mjs';
 import { DiscreteWalletState } from '../src/crypto/discrete-wallet-state.mjs';
 
@@ -6,6 +6,18 @@ import { DiscreteWalletState } from '../src/crypto/discrete-wallet-state.mjs';
 // counts as synchronized, so start_mining only arms the miner and no block is found.
 const base = process.env.DISCRETE_E2E_RPC || 'http://127.0.0.1:19331/';
 const hex = bytes => Buffer.from(bytes).toString('hex');
+// A daemon built with a patched PQ_TRANSCRIPT_V2_HEIGHT (fork rehearsal) needs the
+// same height here, or the transactions below are signed under the wrong transcript.
+const transcriptV2Height = process.env.DISCRETE_E2E_TRANSCRIPT_V2_HEIGHT
+  ? Number(process.env.DISCRETE_E2E_TRANSCRIPT_V2_HEIGHT) : 0xFFFFFFFF;  // unscheduled, as in the node
+// getheight is the block count, i.e. the index of the next block: the height a
+// transaction submitted now is validated at.
+const signingNow = async () => {
+  const { height } = await fetch(new URL('getheight', base)).then(r => r.json());
+  const signing = signingContextForHeight(height, true, transcriptV2Height);
+  console.log(`signing at height ${height} with transcript v${signing.useV2 ? 2 : 1}`);
+  return signing;
+};
 const rpc = async (path, body) => {
   const response = await fetch(new URL(path, base), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`);
@@ -61,7 +73,8 @@ const fee = 1n;
 const sendAmount = input.amount - fee;
 const built = buildSignedTransaction({ inputs: [input], destinations: [{
   viewPublicKey: recipientKeys.viewPublicKey, spendPublicKey: recipientKeys.spendPublicKey, amount: sendAmount,
-}], fee, spendPublicKey: senderKeys.spendPublicKey, spendSecretKey: senderKeys.spendSecretKey });
+}], fee, spendPublicKey: senderKeys.spendPublicKey, spendSecretKey: senderKeys.spendSecretKey,
+  signing: await signingNow() });
 const submitted = await rpc('sendrawtransaction', { tx_as_hex: hex(built.bytes) });
 if (submitted.status !== 'OK') throw new Error(`transaction rejected: ${JSON.stringify(submitted)}`);
 
@@ -80,7 +93,8 @@ if (registrationChange > 0n) registrationDestinations.push({
   viewPublicKey: recipientKeys.viewPublicKey, spendPublicKey: recipientKeys.spendPublicKey, amount: registrationChange,
 });
 const registrationTx = buildSignedTransaction({ inputs: [registrationInput], destinations: registrationDestinations,
-  fee, extra: registrationExtra, spendPublicKey: recipientKeys.spendPublicKey, spendSecretKey: recipientKeys.spendSecretKey });
+  fee, extra: registrationExtra, spendPublicKey: recipientKeys.spendPublicKey, spendSecretKey: recipientKeys.spendSecretKey,
+  signing: await signingNow() });
 const registrationSubmitted = await rpc('sendrawtransaction', { tx_as_hex: hex(registrationTx.bytes) });
 if (registrationSubmitted.status !== 'OK') throw new Error(`registration rejected: ${JSON.stringify(registrationSubmitted)}`);
 await mineUntilConfirmed(senderSeed);

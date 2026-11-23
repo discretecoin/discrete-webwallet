@@ -21,6 +21,11 @@ myGlobal.config = {
 	txCoinbaseMinConfirms: 10,
 	ctForkHeight: 4294967294,
 	ctForkHeightTestnet: 400,
+	// Height at which TX_PQ signatures move to the version-2 transcript
+	// (parameters::PQ_TRANSCRIPT_V2_HEIGHT in the node). Must change together with
+	// the node's value; 4294967295 = not scheduled, so everything signs version 1.
+	transcriptV2Height: 4294967295,
+	transcriptV2HeightTestnet: 4294967295,
 	addressPrefix: 3425755, // 0x3445db ("disc")
 	integratedAddressPrefix: 3425755,
 	addressPrefixTestnet: 3425755,

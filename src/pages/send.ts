@@ -476,7 +476,11 @@ class SendView extends DestructableView {
 			let change = total - amount - feeAmount;
 			if(change > BigInt(0)) destinations.push({viewPublicKey:keys.viewPublicKey, spendPublicKey:keys.spendPublicKey, amount:change});
 			let built = DiscreteRuntime.buildSignedTransaction({inputs:selected, destinations:destinations, fee:feeAmount,
-				spendPublicKey:keys.spendPublicKey, spendSecretKey:keys.spendSecretKey});
+				spendPublicKey:keys.spendPublicKey, spendSecretKey:keys.spendSecretKey,
+				// wallet.lastHeight is the next block index (tip + 1) once synced: the height
+				// consensus will judge this transaction at, so it picks the signing transcript.
+				signing:DiscreteRuntime.signingContextForHeight(wallet.lastHeight, Boolean(config.testnet),
+					config.testnet ? config.transcriptV2HeightTestnet : config.transcriptV2Height)});
 			let raw = Array.prototype.map.call(built.bytes, (byte:number) => ('0'+byte.toString(16)).slice(-2)).join('');
 			swal({title:i18n.t('sendPage.confirmTransactionModal.title'), html:i18n.t('sendPage.confirmTransactionModal.content', {
 				amount:Number(amount) / Math.pow(10, config.coinUnitPlaces), fees:Number(feeAmount) / Math.pow(10, config.coinUnitPlaces),

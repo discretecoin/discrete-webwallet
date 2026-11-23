@@ -384,7 +384,11 @@ class AccountView extends DestructableView{
 			if(change > BigInt(0)) destinations.push({viewPublicKey:keys.viewPublicKey, spendPublicKey:keys.spendPublicKey, amount:change});
 			let extra = DiscreteRuntime.accountRegistrationExtra(keys.viewPublicKey, keys.spendPublicKey);
 			let built = DiscreteRuntime.buildSignedTransaction({inputs:selected, destinations:destinations, fee:feeAmount,
-				extra:extra, spendPublicKey:keys.spendPublicKey, spendSecretKey:keys.spendSecretKey});
+				extra:extra, spendPublicKey:keys.spendPublicKey, spendSecretKey:keys.spendSecretKey,
+				// wallet.lastHeight is the next block index (tip + 1) once synced: the height
+				// consensus will judge this transaction at, so it picks the signing transcript.
+				signing:DiscreteRuntime.signingContextForHeight(wallet.lastHeight, Boolean(config.testnet),
+					config.testnet ? config.transcriptV2HeightTestnet : config.transcriptV2Height)});
 			let raw = Array.prototype.map.call(built.bytes, (byte:number) => ('0'+byte.toString(16)).slice(-2)).join('');
 			let self = this;
 			swal({

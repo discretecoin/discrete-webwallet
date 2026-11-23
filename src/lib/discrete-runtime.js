@@ -28,6 +28,7 @@ var DiscreteRuntime = (() => {
     DiscreteWalletState: () => DiscreteWalletState,
     FREE_REG_POW_DOMAIN: () => FREE_REG_POW_DOMAIN,
     FREE_REG_POW_TARGET: () => FREE_REG_POW_TARGET,
+    GENESIS_BLOCK_IDS: () => GENESIS_BLOCK_IDS,
     accountRegistrationExtra: () => accountRegistrationExtra,
     buildFreeRegistrationTransaction: () => buildFreeRegistrationTransaction,
     buildSignedTransaction: () => buildSignedTransaction,
@@ -56,8 +57,10 @@ var DiscreteRuntime = (() => {
     scanPqOutput: () => scanPqOutput,
     scanPqOutputLegacyTWindow: () => scanPqOutputLegacyTWindow,
     serializeTransaction: () => serializeTransaction,
+    signingContextForHeight: () => signingContextForHeight,
     transactionInputsHash: () => transactionInputsHash,
-    transactionSigningDigest: () => transactionSigningDigest
+    transactionSigningDigest: () => transactionSigningDigest,
+    transactionSigningDigestV2: () => transactionSigningDigestV2
   });
 
   // node_modules/@noble/hashes/utils.js
@@ -2988,8 +2991,23 @@ var DiscreteRuntime = (() => {
     const transaction = { txType: 3, inputs: [], outputs: [], extra, signatures: [] };
     return { transaction, bytes: serializeTransaction(transaction) };
   }
-  function transactionSigningDigest(transaction, fee) {
-    const chunks = [utf82.encode("discrete-pq-tx-sign-v1"), Uint8Array.of(1, 1), le642(0), le322(transaction.inputs.length)];
+  var GENESIS_BLOCK_IDS = Object.freeze({
+    mainnet: "06c4df2cd46045b9fbc1664a10f1bdf0355f672c8349bbd29d671bf48e83d7bd",
+    testnet: "fa8828f3f38fa6f91842dec9a837e1ad33d920aa55f989e2baf1d1058d4f4251"
+  });
+  var NO_KEY_REF = 4294967295;
+  var fromHex = (hex) => Uint8Array.from(hex.match(/../g) || [], (byte) => parseInt(byte, 16));
+  function signingContextForHeight(height, testnet, transcriptV2Height) {
+    if (!Number.isSafeInteger(height) || height < 0) throw new RangeError("invalid signing height");
+    if (!Number.isSafeInteger(transcriptV2Height) || transcriptV2Height < 0) throw new RangeError("invalid transcript v2 height");
+    return {
+      useV2: height >= transcriptV2Height,
+      chainId: fromHex(testnet ? GENESIS_BLOCK_IDS.testnet : GENESIS_BLOCK_IDS.mainnet)
+    };
+  }
+  function signingBody(transaction, fee) {
+    const txType = transaction.txType === void 0 ? 1 : transaction.txType;
+    const chunks = [Uint8Array.of(1, txType), le642(0), le322(transaction.inputs.length)];
     for (const input of transaction.inputs) chunks.push(input.transactionHash, le322(input.outputIndex), input.spendPublicKey, input.rho);
     chunks.push(le322(transaction.outputs.length));
     for (const output of transaction.outputs) chunks.push(
@@ -3001,7 +3019,21 @@ var DiscreteRuntime = (() => {
       output.spendCommit
     );
     chunks.push(le322(transaction.extra.length), transaction.extra, le642(fee));
-    return sha3_256(concat3(...chunks));
+    return chunks;
+  }
+  function transactionSigningDigest(transaction, fee) {
+    return sha3_256(concat3(utf82.encode("discrete-pq-tx-sign-v1"), ...signingBody(transaction, fee)));
+  }
+  function transactionSigningDigestV2(transaction, fee, chainId, inputIndex) {
+    if (!(chainId instanceof Uint8Array) || chainId.length !== 32) throw new Error("invalid chain id");
+    if (!Number.isInteger(inputIndex) || inputIndex < 0 || inputIndex >= transaction.inputs.length) throw new RangeError("invalid input index");
+    return sha3_256(concat3(
+      utf82.encode("discrete-pq-tx-sign-v2"),
+      chainId,
+      ...signingBody(transaction, fee),
+      ...transaction.inputs.map(() => le322(NO_KEY_REF)),
+      le322(inputIndex)
+    ));
   }
   function serializeTransaction(transaction) {
     const chunks = [varint2(1), varint2(transaction.txType === void 0 ? 1 : transaction.txType), varint2(0), varint2(transaction.inputs.length)];
@@ -3024,7 +3056,8 @@ var DiscreteRuntime = (() => {
     chunks.push(varint2(transaction.extra.length), transaction.extra, ...transaction.signatures);
     return concat3(...chunks);
   }
-  function buildSignedTransaction({ inputs, destinations, fee, spendPublicKey, spendSecretKey, extra = new Uint8Array() }) {
+  function buildSignedTransaction({ inputs, destinations, fee, spendPublicKey, spendSecretKey, extra = new Uint8Array(), signing }) {
+    if (!signing || typeof signing.useV2 !== "boolean") throw new Error("signing context required (signingContextForHeight)");
     const normalizedInputs = inputs.map((input) => ({
       transactionHash: typeof input.transactionHash === "string" ? Uint8Array.from(input.transactionHash.match(/../g), (b) => parseInt(b, 16)) : input.transactionHash,
       outputIndex: input.outputIndex,
@@ -3055,8 +3088,12 @@ var DiscreteRuntime = (() => {
       };
     });
     const transaction = { txType: 1, inputs: normalizedInputs, outputs, extra, signatures: [] };
-    const digest = transactionSigningDigest(transaction, BigInt(fee));
-    transaction.signatures = normalizedInputs.map(() => ml_dsa65.sign(digest, spendSecretKey));
+    if (signing.useV2) {
+      transaction.signatures = normalizedInputs.map((_, index) => ml_dsa65.sign(transactionSigningDigestV2(transaction, BigInt(fee), signing.chainId, index), spendSecretKey));
+    } else {
+      const digest = transactionSigningDigest(transaction, BigInt(fee));
+      transaction.signatures = normalizedInputs.map(() => ml_dsa65.sign(digest, spendSecretKey));
+    }
     return { transaction, bytes: serializeTransaction(transaction) };
   }
 
