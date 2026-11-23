@@ -28,14 +28,55 @@ export function buildFreeRegistrationTransaction({ viewPublicKey, spendPublicKey
   return { transaction, bytes: serializeTransaction(transaction) };
 }
 
-export function transactionSigningDigest(transaction, fee) {
-  const chunks = [utf8.encode('discrete-pq-tx-sign-v1'), Uint8Array.of(1, 1), le64(0), le32(transaction.inputs.length)];
+// Height at which TX_PQ signatures move to the version-2 transcript. Mirrors
+// parameters::PQ_TRANSCRIPT_V2_HEIGHT in the node and must be changed together
+// with it: 0xFFFFFFFF means not scheduled, so every transaction is signed under
+// version 1 until a height is announced.
+export const PQ_TRANSCRIPT_V2_HEIGHT = 0xFFFFFFFF;
+
+// Genesis block ids, the chain identity the version-2 transcript binds. Pinned
+// rather than asked of the node: the node is not trusted to name the network.
+export const GENESIS_BLOCK_IDS = Object.freeze({
+  mainnet: '06c4df2cd46045b9fbc1664a10f1bdf0355f672c8349bbd29d671bf48e83d7bd',
+  testnet: 'fa8828f3f38fa6f91842dec9a837e1ad33d920aa55f989e2baf1d1058d4f4251',
+});
+
+// keyRef of an input that carries its own key. This wallet never builds
+// key-reference inputs, so every input signs and carries its key.
+const NO_KEY_REF = 0xFFFFFFFF;
+const fromHex = hex => Uint8Array.from(hex.match(/../g) || [], byte => parseInt(byte, 16));
+
+// The transcript for a transaction built now. `height` is the index of the block
+// expected to carry it (tip + 1), the number consensus judges it at.
+export function signingContextForHeight(height, testnet, transcriptV2Height = PQ_TRANSCRIPT_V2_HEIGHT) {
+  if (!Number.isSafeInteger(height) || height < 0) throw new RangeError('invalid signing height');
+  return { useV2: height >= transcriptV2Height,
+    chainId: fromHex(testnet ? GENESIS_BLOCK_IDS.testnet : GENESIS_BLOCK_IDS.mainnet) };
+}
+
+// Everything both transcripts hash after their domain (and v2's chain id).
+function signingBody(transaction, fee) {
+  const txType = transaction.txType === undefined ? 1 : transaction.txType;
+  const chunks = [Uint8Array.of(1, txType), le64(0), le32(transaction.inputs.length)];
   for (const input of transaction.inputs) chunks.push(input.transactionHash, le32(input.outputIndex), input.spendPublicKey, input.rho);
   chunks.push(le32(transaction.outputs.length));
   for (const output of transaction.outputs) chunks.push(Uint8Array.of(0x10), le64(output.amount), le64(output.unlockHeight),
     output.kemCiphertext, output.encryptedPayload, output.spendCommit);
   chunks.push(le32(transaction.extra.length), transaction.extra, le64(fee));
-  return sha3_256(concat(...chunks));
+  return chunks;
+}
+
+export function transactionSigningDigest(transaction, fee) {
+  return sha3_256(concat(utf8.encode('discrete-pq-tx-sign-v1'), ...signingBody(transaction, fee)));
+}
+
+// Version 2 binds the chain and the input being authorized, so a signature is
+// valid in one position of one transaction on one network.
+export function transactionSigningDigestV2(transaction, fee, chainId, inputIndex) {
+  if (!(chainId instanceof Uint8Array) || chainId.length !== 32) throw new Error('invalid chain id');
+  if (!Number.isInteger(inputIndex) || inputIndex < 0 || inputIndex >= transaction.inputs.length) throw new RangeError('invalid input index');
+  return sha3_256(concat(utf8.encode('discrete-pq-tx-sign-v2'), chainId, ...signingBody(transaction, fee),
+    ...transaction.inputs.map(() => le32(NO_KEY_REF)), le32(inputIndex)));
 }
 
 export function serializeTransaction(transaction) {
@@ -49,7 +90,9 @@ export function serializeTransaction(transaction) {
   return concat(...chunks);
 }
 
-export function buildSignedTransaction({ inputs, destinations, fee, spendPublicKey, spendSecretKey, extra = new Uint8Array() }) {
+export function buildSignedTransaction({ inputs, destinations, fee, spendPublicKey, spendSecretKey, extra = new Uint8Array(), signing }) {
+  // Required, so no caller can fall back to version 1 past the activation height.
+  if (!signing || typeof signing.useV2 !== 'boolean') throw new Error('signing context required (signingContextForHeight)');
   const normalizedInputs = inputs.map(input => ({
     transactionHash: typeof input.transactionHash === 'string' ? Uint8Array.from(input.transactionHash.match(/../g), b => parseInt(b, 16)) : input.transactionHash,
     outputIndex: input.outputIndex, amount: BigInt(input.amount), rho: input.rho, spendPublicKey,
@@ -71,7 +114,12 @@ export function buildSignedTransaction({ inputs, destinations, fee, spendPublicK
       spendCommit: calculateSpendCommit(destination.spendPublicKey, rho), rho };
   });
   const transaction = { txType: 1, inputs: normalizedInputs, outputs, extra, signatures: [] };
-  const digest = transactionSigningDigest(transaction, BigInt(fee));
-  transaction.signatures = normalizedInputs.map(() => ml_dsa65.sign(digest, spendSecretKey));
+  if (signing.useV2) {
+    transaction.signatures = normalizedInputs.map((_, index) =>
+      ml_dsa65.sign(transactionSigningDigestV2(transaction, BigInt(fee), signing.chainId, index), spendSecretKey));
+  } else {
+    const digest = transactionSigningDigest(transaction, BigInt(fee));
+    transaction.signatures = normalizedInputs.map(() => ml_dsa65.sign(digest, spendSecretKey));
+  }
   return { transaction, bytes: serializeTransaction(transaction) };
 }
