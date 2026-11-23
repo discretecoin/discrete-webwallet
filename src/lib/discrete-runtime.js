@@ -29,7 +29,6 @@ var DiscreteRuntime = (() => {
     FREE_REG_POW_DOMAIN: () => FREE_REG_POW_DOMAIN,
     FREE_REG_POW_TARGET: () => FREE_REG_POW_TARGET,
     GENESIS_BLOCK_IDS: () => GENESIS_BLOCK_IDS,
-    PQ_TRANSCRIPT_V2_HEIGHT: () => PQ_TRANSCRIPT_V2_HEIGHT,
     accountRegistrationExtra: () => accountRegistrationExtra,
     buildFreeRegistrationTransaction: () => buildFreeRegistrationTransaction,
     buildSignedTransaction: () => buildSignedTransaction,
@@ -2992,15 +2991,15 @@ var DiscreteRuntime = (() => {
     const transaction = { txType: 3, inputs: [], outputs: [], extra, signatures: [] };
     return { transaction, bytes: serializeTransaction(transaction) };
   }
-  var PQ_TRANSCRIPT_V2_HEIGHT = 4294967295;
   var GENESIS_BLOCK_IDS = Object.freeze({
     mainnet: "06c4df2cd46045b9fbc1664a10f1bdf0355f672c8349bbd29d671bf48e83d7bd",
     testnet: "fa8828f3f38fa6f91842dec9a837e1ad33d920aa55f989e2baf1d1058d4f4251"
   });
   var NO_KEY_REF = 4294967295;
   var fromHex = (hex) => Uint8Array.from(hex.match(/../g) || [], (byte) => parseInt(byte, 16));
-  function signingContextForHeight(height, testnet, transcriptV2Height = PQ_TRANSCRIPT_V2_HEIGHT) {
+  function signingContextForHeight(height, testnet, transcriptV2Height) {
     if (!Number.isSafeInteger(height) || height < 0) throw new RangeError("invalid signing height");
+    if (!Number.isSafeInteger(transcriptV2Height) || transcriptV2Height < 0) throw new RangeError("invalid transcript v2 height");
     return {
       useV2: height >= transcriptV2Height,
       chainId: fromHex(testnet ? GENESIS_BLOCK_IDS.testnet : GENESIS_BLOCK_IDS.mainnet)

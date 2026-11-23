@@ -14,6 +14,8 @@ declare var config : {
 	txCoinbaseMinConfirms: number, // corresponds to CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW in Monero
 	ctForkHeight: number,
 	ctForkHeightTestnet: number,
+	transcriptV2Height: number,
+	transcriptV2HeightTestnet: number,
 	coinSymbol: string,
 	openAliasPrefix: string,
 	coinName: string,

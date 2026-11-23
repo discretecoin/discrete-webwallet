@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { ml_dsa65 } from '@noble/post-quantum/ml-dsa.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { accountRegistrationExtra, buildSignedTransaction, transactionSigningDigest,
-  transactionSigningDigestV2, signingContextForHeight, GENESIS_BLOCK_IDS, PQ_TRANSCRIPT_V2_HEIGHT } from '../src/crypto/discrete-transaction.mjs';
+  transactionSigningDigestV2, signingContextForHeight, GENESIS_BLOCK_IDS } from '../src/crypto/discrete-transaction.mjs';
 import { scanPqOutput, transactionInputsHash } from '../src/crypto/discrete-protocol.mjs';
 
 const vectors = JSON.parse(await readFile(new URL('../../discrete/tests/pq/kat_vectors.json', import.meta.url), 'utf8')).vectors;
 const pattern = (length, a, b) => Uint8Array.from({ length }, (_, i) => (i * a + b) & 255);
 const hex = bytes => Buffer.from(bytes).toString('hex');
+const UNSCHEDULED = 0xFFFFFFFF;  // config.transcriptV2Height today
 const kat = { inputs: [{ transactionHash: pattern(32, 1, 0), outputIndex: 7,
   spendPublicKey: pattern(1952, 5, 1), rho: pattern(32, 3, 9) }], outputs: [{
   amount: 1000000n, unlockHeight: 0n, kemCiphertext: pattern(1088, 7, 3),
@@ -21,7 +22,7 @@ const spend = ml_dsa65.keygen(pattern(32, 3, 8));
 const recipient = ml_kem768.keygen(pattern(64, 5, 9));
 const built = buildSignedTransaction({ inputs: [{ transactionHash: '01'.repeat(32), outputIndex: 2, amount: 30n, rho: pattern(32, 7, 4) }],
   destinations: [{ viewPublicKey: recipient.publicKey, spendPublicKey: spend.publicKey, amount: 25n }],
-  fee: 5n, spendPublicKey: spend.publicKey, spendSecretKey: spend.secretKey, signing: signingContextForHeight(0, false) });
+  fee: 5n, spendPublicKey: spend.publicKey, spendSecretKey: spend.secretKey, signing: signingContextForHeight(0, false, UNSCHEDULED) });
 assert.equal(built.transaction.signatures.length, 1);
 
 const registration = accountRegistrationExtra(recipient.publicKey, spend.publicKey);
@@ -42,7 +43,7 @@ assert.equal(built.bytes.length > 6000, true);
   const deposit = buildSignedTransaction({ inputs,
     destinations: [{ viewPublicKey: recipient.publicKey, spendPublicKey: spend.publicKey,
       amount: 35n, subaddressIndex: depositIndex }],
-    fee: 5n, spendPublicKey: spend.publicKey, spendSecretKey: spend.secretKey, signing: signingContextForHeight(0, false) });
+    fee: 5n, spendPublicKey: spend.publicKey, spendSecretKey: spend.secretKey, signing: signingContextForHeight(0, false, UNSCHEDULED) });
   const inputsHash = transactionInputsHash(inputs.map(input => ({
     prevTxid: Uint8Array.from(input.transactionHash.match(/../g), b => parseInt(b, 16)),
     prevOutIndex: input.outputIndex })));
@@ -69,13 +70,13 @@ assert.equal(built.bytes.length > 6000, true);
 
 // The activation boundary and the chain identity.
 {
-  assert.equal(PQ_TRANSCRIPT_V2_HEIGHT, 0xFFFFFFFF);  // unscheduled, as in the node
-  assert.equal(signingContextForHeight(5000000, false).useV2, false);
+  assert.throws(() => signingContextForHeight(0, false), RangeError);  // no default activation height
+  assert.equal(signingContextForHeight(5000000, false, UNSCHEDULED).useV2, false);
   assert.equal(signingContextForHeight(39, false, 40).useV2, false);
   assert.equal(signingContextForHeight(40, false, 40).useV2, true);
-  assert.equal(hex(signingContextForHeight(0, false).chainId), GENESIS_BLOCK_IDS.mainnet);
-  assert.equal(hex(signingContextForHeight(0, true).chainId), GENESIS_BLOCK_IDS.testnet);
-  assert.throws(() => signingContextForHeight(-1, false), RangeError);
+  assert.equal(hex(signingContextForHeight(0, false, UNSCHEDULED).chainId), GENESIS_BLOCK_IDS.mainnet);
+  assert.equal(hex(signingContextForHeight(0, true, UNSCHEDULED).chainId), GENESIS_BLOCK_IDS.testnet);
+  assert.throws(() => signingContextForHeight(-1, false, UNSCHEDULED), RangeError);
   assert.throws(() => buildSignedTransaction({ inputs: [], destinations: [], fee: 0n,
     spendPublicKey: spend.publicKey, spendSecretKey: spend.secretKey }), /signing context required/);
 }
@@ -104,4 +105,13 @@ assert.equal(built.bytes.length > 6000, true);
     destinations: [{ viewPublicKey: recipient.publicKey, spendPublicKey: spend.publicKey, amount: 35n }],
     fee: 5n, spendPublicKey: spend.publicKey, spendSecretKey: spend.secretKey, signing: signingContextForHeight(39, true, 40) });
   assert.equal(v1.bytes.length, v2.bytes.length);
+}
+
+// The activation heights in config.ts mirror the node's CryptoNoteConfig.h.
+{
+  const config = await readFile(new URL('../src/config.ts', import.meta.url), 'utf8');
+  const node = await readFile(new URL('../../discrete/src/CryptoNoteConfig.h', import.meta.url), 'utf8');
+  const nodeValue = node.match(/PQ_TRANSCRIPT_V2_HEIGHT\s*=\s*([A-Z0-9_]+)/)[1];
+  const expected = nodeValue === 'UINT32_MAX' ? 4294967295 : Number(nodeValue);
+  assert.equal(Number(config.match(/transcriptV2Height:\s*(\d+)/)[1]), expected);
 }

@@ -1,4 +1,4 @@
-import { accountRegistrationExtra, buildSignedTransaction, signingContextForHeight, PQ_TRANSCRIPT_V2_HEIGHT } from '../src/crypto/discrete-transaction.mjs';
+import { accountRegistrationExtra, buildSignedTransaction, signingContextForHeight } from '../src/crypto/discrete-transaction.mjs';
 import { deriveWalletKeys, encodeAddress, parseAccountNumber } from '../src/crypto/discrete-wallet-keys.mjs';
 import { DiscreteWalletState } from '../src/crypto/discrete-wallet-state.mjs';
 
@@ -9,7 +9,7 @@ const hex = bytes => Buffer.from(bytes).toString('hex');
 // A daemon built with a patched PQ_TRANSCRIPT_V2_HEIGHT (fork rehearsal) needs the
 // same height here, or the transactions below are signed under the wrong transcript.
 const transcriptV2Height = process.env.DISCRETE_E2E_TRANSCRIPT_V2_HEIGHT
-  ? Number(process.env.DISCRETE_E2E_TRANSCRIPT_V2_HEIGHT) : PQ_TRANSCRIPT_V2_HEIGHT;
+  ? Number(process.env.DISCRETE_E2E_TRANSCRIPT_V2_HEIGHT) : 0xFFFFFFFF;  // unscheduled, as in the node
 // getheight is the block count, i.e. the index of the next block: the height a
 // transaction submitted now is validated at.
 const signingNow = async () => {

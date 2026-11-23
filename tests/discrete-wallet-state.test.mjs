@@ -121,7 +121,7 @@ assert.equal(resetState.height, 43);
       destinations: [{ viewPublicKey: recipient.viewPublicKey, spendPublicKey: recipient.spendPublicKey,
         amount: 499n, subaddressIndex: depositIndex }],
       fee: 1n, spendPublicKey: sender.spendPublicKey, spendSecretKey: sender.spendSecretKey,
-      signing: signingContextForHeight(0, false),
+      signing: signingContextForHeight(0, false, 0xFFFFFFFF),
     });
 
     const received = new DiscreteWalletState(100);
@@ -178,7 +178,7 @@ assert.equal(resetState.height, 43);
       { viewPublicKey: owner.viewPublicKey, spendPublicKey: owner.spendPublicKey, amount: 300n },
       { viewPublicKey: owner.viewPublicKey, spendPublicKey: owner.spendPublicKey, amount: 200n }],
     fee: 1n, spendPublicKey: funder.spendPublicKey, spendSecretKey: funder.spendSecretKey,
-    signing: signingContextForHeight(0, false),
+    signing: signingContextForHeight(0, false, 0xFFFFFFFF),
   });
   const wallet = new DiscreteWalletState(10);
   wallet.applyBlock({ height: 10, hash: '10'.repeat(32), previous_hash: null, timestamp: 1,
@@ -192,7 +192,7 @@ assert.equal(resetState.height, 43);
       amount: output.amount, rho: output.rho })),
     destinations: [{ viewPublicKey: payee.viewPublicKey, spendPublicKey: payee.spendPublicKey, amount: 499n }],
     fee: 1n, spendPublicKey: owner.spendPublicKey, spendSecretKey: owner.spendSecretKey,
-    signing: signingContextForHeight(0, false),
+    signing: signingContextForHeight(0, false, 0xFFFFFFFF),
   });
   const groupedWire = toWire(spendBoth, 'ef'.repeat(32), true);
   assert.equal(groupedWire.transaction.vin[1].type, '13');

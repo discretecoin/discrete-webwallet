@@ -28,12 +28,6 @@ export function buildFreeRegistrationTransaction({ viewPublicKey, spendPublicKey
   return { transaction, bytes: serializeTransaction(transaction) };
 }
 
-// Height at which TX_PQ signatures move to the version-2 transcript. Mirrors
-// parameters::PQ_TRANSCRIPT_V2_HEIGHT in the node and must be changed together
-// with it: 0xFFFFFFFF means not scheduled, so every transaction is signed under
-// version 1 until a height is announced.
-export const PQ_TRANSCRIPT_V2_HEIGHT = 0xFFFFFFFF;
-
 // Genesis block ids, the chain identity the version-2 transcript binds. Pinned
 // rather than asked of the node: the node is not trusted to name the network.
 export const GENESIS_BLOCK_IDS = Object.freeze({
@@ -48,8 +42,11 @@ const fromHex = hex => Uint8Array.from(hex.match(/../g) || [], byte => parseInt(
 
 // The transcript for a transaction built now. `height` is the index of the block
 // expected to carry it (tip + 1), the number consensus judges it at.
-export function signingContextForHeight(height, testnet, transcriptV2Height = PQ_TRANSCRIPT_V2_HEIGHT) {
+// `transcriptV2Height` is the activation height (config.transcriptV2Height[Testnet],
+// mirroring parameters::PQ_TRANSCRIPT_V2_HEIGHT); there is deliberately no default.
+export function signingContextForHeight(height, testnet, transcriptV2Height) {
   if (!Number.isSafeInteger(height) || height < 0) throw new RangeError('invalid signing height');
+  if (!Number.isSafeInteger(transcriptV2Height) || transcriptV2Height < 0) throw new RangeError('invalid transcript v2 height');
   return { useV2: height >= transcriptV2Height,
     chainId: fromHex(testnet ? GENESIS_BLOCK_IDS.testnet : GENESIS_BLOCK_IDS.mainnet) };
 }
